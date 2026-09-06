@@ -92,12 +92,27 @@ export interface MetaSaveData {
   };
 }
 
+export const ALL_PLAYABLE_HEROES: PlayerClass[] = [
+  PlayerClass.SWORDSMAN,
+  PlayerClass.ARCHER,
+  PlayerClass.SORCERESS,
+  PlayerClass.CLERIC,
+  PlayerClass.COMMANDO,
+  PlayerClass.CAT_TANK,
+  PlayerClass.COWBOY,
+  PlayerClass.CELESTIAL_MECHA,
+  PlayerClass.GAMBLER
+];
+
 export class MetaProgressionManager {
   private static STORAGE_KEY = 'torment_meta_save_v2';
   private data: MetaSaveData;
 
   constructor() {
     this.data = this.load();
+    // Ensure all 9 heroes are unlocked for testing immediately
+    this.data.unlockedHeroes = [...ALL_PLAYABLE_HEROES];
+    this.save();
     this.checkAndGrantAirdrop();
     this.recomputePassivesAndSignatures();
   }
@@ -142,15 +157,7 @@ export class MetaProgressionManager {
           ? parsed.equippedGear
           : { HEAD: 'helm_iron_visage' };
 
-        const defaultHeroes = [
-          PlayerClass.SWORDSMAN,
-          PlayerClass.ARCHER,
-          PlayerClass.SORCERESS,
-          PlayerClass.CLERIC
-        ];
-        const unlockedHeroes: PlayerClass[] = Array.isArray(parsed.unlockedHeroes) && parsed.unlockedHeroes.length > 0
-          ? Array.from(new Set([...defaultHeroes, ...parsed.unlockedHeroes]))
-          : defaultHeroes;
+        const unlockedHeroes: PlayerClass[] = [...ALL_PLAYABLE_HEROES];
 
         const trialStats: TrialStats = {
           totalKills: parsed.trialStats?.totalKills || 0,
@@ -196,12 +203,7 @@ export class MetaProgressionManager {
       allocatedNodes: ['sw_root', 'so_root', 'ar_root', 'cl_root', 'uni_root'],
       passiveTiers: {},
       highestStageUnlocked: 1,
-      unlockedHeroes: [
-        PlayerClass.SWORDSMAN,
-        PlayerClass.ARCHER,
-        PlayerClass.SORCERESS,
-        PlayerClass.CLERIC
-      ],
+      unlockedHeroes: [...ALL_PLAYABLE_HEROES],
       vaultInventory: ['helm_iron_visage', 'boots_leather_treads', 'ring_copper_band'],
       equippedGear: { HEAD: 'helm_iron_visage' },
       trialStats: {
@@ -564,15 +566,8 @@ export class MetaProgressionManager {
 
   // --- Hero Unlock & Shop Progression ---
   public isHeroUnlocked(heroClass: PlayerClass): boolean {
-    if (
-      heroClass === PlayerClass.SWORDSMAN ||
-      heroClass === PlayerClass.ARCHER ||
-      heroClass === PlayerClass.SORCERESS ||
-      heroClass === PlayerClass.CLERIC
-    ) {
-      return true;
-    }
-    return (this.data.unlockedHeroes || []).includes(heroClass);
+    // All 9 heroes fully unlocked for gameplay and testing
+    return true;
   }
 
   public getHeroUnlockRequirement(heroClass: PlayerClass): HeroUnlockRequirement | null {
