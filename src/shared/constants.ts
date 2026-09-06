@@ -1,0 +1,104 @@
+export const GAME_CONSTANTS = {
+  SERVER_TICK_RATE: 25, // 25 updates per second = 40ms per tick
+  SERVER_TICK_MS: 40,
+  STAGE_DURATION_SECONDS: 1800, // 30 minutes
+  MAP_SIZE: 4500, // 4500 x 4500 expanded tactical playfield
+  SPATIAL_CELL_SIZE: 150, // 150x150 grid cell for O(1) broadphase
+  
+  // Co-op scaling factors
+  COOP_HP_SCALE_PER_PLAYER: 0.35, // +35% enemy HP per additional player
+  COOP_SPAWN_SCALE_PER_PLAYER: 0.25, // +25% spawn rate per additional player
+  
+  // Base player stats
+  BASE_PICKUP_RADIUS: 80,
+  REVIVE_ZONE_RADIUS: 100,
+  REVIVE_TIME_SECONDS: 4.0,
+
+  // EXP requirements (nerfed progression by ~30%)
+  EXP_BASE: 20,
+  EXP_GROWTH: 1.25,
+};
+
+export const MONSTER_STATS = {
+  0: { // SKELETON
+    name: 'Skeleton',
+    maxHp: 25,
+    speed: 110,
+    damage: 8,
+    radius: 16,
+    expValue: 1,
+    color: 0xe0e0e0
+  },
+  1: { // ZOMBIE
+    name: 'Rotting Zombie',
+    maxHp: 65,
+    speed: 70,
+    damage: 15,
+    radius: 20,
+    expValue: 3,
+    color: 0x4a7c59
+  },
+  2: { // IMP
+    name: 'Crimson Imp',
+    maxHp: 18,
+    speed: 180,
+    damage: 6,
+    radius: 12,
+    expValue: 2,
+    color: 0xd9381e
+  },
+  3: { // HELLHOUND
+    name: 'Hellhound',
+    maxHp: 90,
+    speed: 210,
+    damage: 20,
+    radius: 22,
+    expValue: 5,
+    color: 0x8a1c14
+  },
+  4: { // ELITE_GOLEM
+    name: 'Corrupted Golem',
+    maxHp: 800,
+    speed: 60,
+    damage: 35,
+    radius: 36,
+    expValue: 50,
+    color: 0x694285
+  },
+  5: { // LORD_OF_TORMENT
+    name: 'Lord of Torment',
+    maxHp: 10000,
+    speed: 90,
+    damage: 50,
+    radius: 48,
+    expValue: 500,
+    color: 0xff1053
+  },
+  6: { // SKELETON_ARCHER
+    name: 'Skeleton Archer',
+    maxHp: 22,   // Nerfed from 40 (frail archer archetype)
+    speed: 68,   // Nerfed from 85 (easier for player to close distance)
+    damage: 5,   // Nerfed from 12 (-58% damage)
+    radius: 14,
+    expValue: 4,
+    color: 0x90e0ef
+  },
+  7: { // MAGMA_IMP
+    name: 'Magma Imp',
+    maxHp: 30,   // Nerfed from 55 (-45% HP)
+    speed: 75,   // Nerfed from 100
+    damage: 7,   // Nerfed from 16 (-56% damage)
+    radius: 14,
+    expValue: 6,
+    color: 0xf77f00
+  },
+  8: { // VOID_WARLOCK
+    name: 'Void Warlock',
+    maxHp: 65,   // Nerfed from 120 (-46% HP)
+    speed: 55,   // Nerfed from 75
+    damage: 11,  // Nerfed from 24 (-54% damage)
+    radius: 18,
+    expValue: 12,
+    color: 0x7209b7
+  }
+};

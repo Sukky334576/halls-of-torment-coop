@@ -1,0 +1,9 @@
+node_modules/
+dist/
+tools/
+*.log
+*.exe
+.DS_Store
+*.local
+.tempmediaStorage/
+.system_generated/
