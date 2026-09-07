@@ -1,11 +1,28 @@
 const puppeteer = require('puppeteer-core');
 const path = require('path');
+const fs = require('fs');
+
+function resolveChromePath() {
+  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  const candidates = {
+    win32: ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'],
+    darwin: ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'],
+    linux: ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium-browser']
+  }[process.platform] || [];
+  const found = candidates.find((p) => fs.existsSync(p));
+  if (!found) {
+    throw new Error(
+      `Could not find a Chrome install for platform "${process.platform}". Set the CHROME_PATH env var to your Chrome executable.`
+    );
+  }
+  return found;
+}
 
 async function testGameInBrowser() {
   console.log('🚀 Running 2.5D Sprite Engine Comprehensive Browser Test on Google Chrome...');
 
   const browser = await puppeteer.launch({
-    executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    executablePath: resolveChromePath(),
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });

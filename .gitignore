@@ -7,3 +7,5 @@ tools/
 *.local
 .tempmediaStorage/
 .system_generated/
+e2e_*.png
+.claude/scheduled_tasks.lock

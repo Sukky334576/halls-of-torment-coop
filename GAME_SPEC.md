@@ -26,48 +26,57 @@ halls-of-torment-coop/
 ├── package.json               # Dependencies (Three.js, ws, vite, typescript, etc.)
 ├── tsconfig.json              # TypeScript compiler configuration
 ├── vite.config.ts             # Vite frontend bundler config
-├── run-game.bat               # 1-Click launcher script (Client + Server + Tunnel)
+├── run-game.bat               # 1-Click launcher script (Windows: Client + Server + Tunnel)
 ├── GAME_SPEC.md               # Complete game documentation & developer handbook
 ├── src/
 │   ├── shared/                # Universal Code (Shared 1:1 between Client & Server)
 │   │   ├── types.ts           # Game state models, networking protocols, enums
 │   │   ├── classes.ts         # 9 Hero definitions, baseline stats, signature cards
-│   │   ├── gearData.ts        # 16+ Weapons, Armor, Boots, Accessories & Shrines
+│   │   ├── gearData.ts        # Weapons, Armor, Boots, Accessories & Shrines
 │   │   ├── skillTreeData.ts   # Massive PoE-style constellation graph & keystones
-│   │   ├── stages.ts          # Stage 1-3 multipliers, monsters & boss data
+│   │   ├── stages.ts          # Stage multipliers, monsters & boss data
 │   │   ├── trialQuests.ts     # In-game achievements, trial milestones & potion rewards
-│   │   └── i18nData.ts        # Bilingual Thai & English dictionary
+│   │   ├── constants.ts       # Shared tunable gameplay constants
+│   │   └── i18n data lives in src/client/engine/I18n.ts (client-only, see below)
 │   ├── server/                # Authoritative Node.js WebSocket Game Engine
 │   │   ├── server.ts          # WebSocket & HTTP server, connection manager, GM API
+│   │   ├── benchmark.ts       # Server-side perf benchmarking harness
+│   │   ├── entities/
+│   │   │   ├── ServerPlayer.ts# Authoritative player state & stat recalculation
+│   │   │   └── ServerMonster.ts# Monster entity state, status effects, speed scaling
 │   │   └── engine/
 │   │       ├── GameRoom.ts    # Main game loop (20 Hz), combat resolver, pickups
 │   │       ├── SpatialGrid.ts # O(1) Spatial Hash Grid for 2,000+ monsters
-│   │       ├── ServerPlayer.ts# Authoritative player state & stat recalculation
-│   │       ├── ServerMonster.ts# Monster entity state, status effects, speed scaling
 │   │       └── HordeDirector.ts# Wave pacing, spawn rings, difficulty progression
 │   └── client/                # Browser Client Application
-│       ├── main.ts            # Client network controller, loop runner, state interpolator
+│       ├── main.ts            # Client network controller, loop runner, state interpolator, input handling
 │       ├── engine/
-│       │   ├── Camera.ts      # Smooth camera follow with zoom and boundaries
-│       │   ├── InputHandler.ts# Keyboard (WASD), Mouse aiming, Space dashing
+│       │   ├── Renderer.ts    # 3D Three.js scene
+│       │   ├── Renderer2D.ts  # 2D Canvas dynamic lighting/rendering
+│       │   ├── InstancedHorde.ts# Instanced 3D rendering for large monster counts
+│       │   ├── HordeSpriteRenderer.ts# 2.5D monster sprite batching
+│       │   ├── SpriteSheetGenerator.ts# Procedural pixel-art sprite generation
+│       │   ├── I18n.ts        # Bilingual Thai & English dictionary + language switching
 │       │   ├── MetaProgression.ts# LocalStorage persistence (coins, unlocks, vault)
 │       │   └── SoundManager.ts# Web Audio API synthesizers & sound effects
-│       ├── rendering/
-│       │   └── GameRenderer.ts# 3D Three.js scene & 2D dynamic lighting canvas
 │       ├── entities/
+│       │   ├── PlayerMesh.ts  # 3D player representation
 │       │   ├── PlayerSprite.ts# Class sprites, rotation, signature passive visual halos
-│       │   ├── MonsterSprite.ts# Pixel art monsters, bosses, health bars, status tags
 │       │   ├── VFX2D.ts       # 2D Canvas projectiles, shockwaves, laser beams, winds
 │       │   └── VisualEffects.ts# 3D meshes & glowing particle systems
 │       └── ui/
-│           ├── LobbyUI.ts     # Character selector, party lobby, chat, ready buttons
-│           ├── HUD.ts         # Player health, team status, damage numbers, minimap
+│           ├── LobbyUI.ts     # Character selector, party lobby, ready buttons
+│           ├── HUD.ts         # Player health, team status, damage numbers
+│           ├── MiniMap.ts     # In-run minimap
 │           ├── SkillTreeUI.ts # Interactive PoE constellation web interface
-│           ├── TraitModalUI.ts# Level-up card selection (Reroll, Banish, Lock)
-│           ├── VaultUI.ts     # Wellkeeper equipment armory & blacksmith
+│           ├── TraitSelector.ts# Level-up card selection (Reroll, Banish, Lock)
+│           ├── GearVaultUI.ts # Wellkeeper equipment armory & blacksmith
+│           ├── HallOfTrialsUI.ts# Achievement/trial browser & reward claiming
 │           └── EscMenuUI.ts   # In-game pause, surrender, and settings menu
-└── scratch/                   # Developer tools, CLI airdrop scripts, Puppeteer tests
+└── scratch/                   # Developer tools, CLI airdrop scripts, Puppeteer e2e tests
 ```
+
+> Directory tree audited against the actual source tree on 2026-09-07 — update this section whenever files are added, renamed, or removed so it doesn't drift again.
 
 ---
 

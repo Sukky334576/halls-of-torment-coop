@@ -2,6 +2,39 @@
 ## Project: Torment of Souls (Dark Fantasy 4-Player Horde Survival)
 *Inspired by Halls of Torment & Diablo II — Enhanced with Modern 3D Visuals & 4-Player Co-op*
 
+> ⚠️ **สถานะเอกสาร:** นี่คือเอกสาร**ออกแบบตั้งต้น (pre-production design pitch)** ก่อนเริ่มพัฒนาจริง เก็บไว้เพื่ออ้างอิงประวัติศาสตร์/ไอเดียเท่านั้น **ไม่ใช่สเปกปัจจุบันของเกม** — เนื้อหาหลายจุดด้านล่างยังไม่ถูก implement หรือถูกเปลี่ยนแนวทางไปแล้วเมื่อเทียบกับโค้ดจริง (ดู checklist ด้านล่าง) สเปกที่ตรงกับของจริงตอนนี้อยู่ที่ **[GAME_SPEC.md](./GAME_SPEC.md)**
+
+---
+
+## ✅ Implementation Status Checklist (audited against source code, 2026-09-07)
+
+**Core Gameplay Loop**
+- [~] Camp/Hub (Wellkeeper equip, Shrine of Blessings, Hall of Heroes) — แนวคิดมีจริงผ่าน Lobby/Gear Vault/Skill Tree UI แต่ไม่ได้แยกเป็น 3 โซนตามที่อธิบาย
+- [~] Survival Stage แบบจับเวลา พร้อม Early/Mid/End Phase — **แก้ไข (เดิมเขียนผิดว่าไม่มี — grep ครั้งแรกพลาดเพราะไม่ใส่ `-i` เลยไม่เจอ `WAVE_DURATION_SEC`):** มีระบบจับเวลาจริง `WAVE_DURATION_SEC = 40` วินาที/เวฟ × 30 เวฟ ≈ 20 นาทีรวม ([HordeDirector.ts:17](src/server/engine/HordeDirector.ts:17)) ใกล้เคียงกับดีไซน์เดิมมาก แต่เป็น 20 นาที ไม่ใช่ 30 และไม่ได้แบ่งชื่อ Early/Mid/End Phase ตามที่อธิบายไว้
+- [x] บอส "Lord of Torment" — **แก้ไข (เดิมเขียนผิดว่าไม่มี):** implement จริง สปอนเป็นบอสเวฟที่ 30 ([HordeDirector.ts:191](src/server/engine/HordeDirector.ts:191)), ฆ่าแล้ว trigger `GAME_OVER` victory ([GameRoom.ts:2138](src/server/engine/GameRoom.ts:2138)) — จังหวะจริงอยู่ที่ ~20 นาที ไม่ใช่ 30:00 เป๊ะ แต่กลไก "เวฟสุดท้าย = บอสจบเกม" มีจริง
+- [ ] Well Shrines โผล่กลางด่านให้ส่งเกียร์ขึ้นบ่อ — `SEND_WELL_GEAR` message ประกาศไว้ใน [types.ts:360](src/shared/types.ts:360) แต่ client ไม่เคยส่ง และ server ไม่มี handler
+- [~] Run Complete ได้ Gold + ปลดล็อกเกียร์ถาวร — ได้ Gold จริง (`teamGold`) แต่การปลดล็อกเกียร์ผ่านบ่อน้ำยังไม่มี
+
+**Character Classes**
+- [🔄] ตารางนี้มีแค่ 4 คลาส (Swordsman/Archer/Sorceress/Cleric) — ของจริงมี **9 คลาส** แล้ว (ดู [GAME_SPEC.md §3](GAME_SPEC.md)) เอกสารนี้สะท้อนสโคปยุคแรกก่อนขยายคลาส
+
+**Combat Math**
+- [x] สูตร Base Damage / Crit — มีจริง ถูกพัฒนาต่อเป็นสูตรปัจจุบันใน [GAME_SPEC.md §4.1](GAME_SPEC.md)
+- [🔄] สถานะ Fragile/Affliction/Electrify — ถูกแทนที่ด้วยระบบ Elemental Reaction ที่ซับซ้อนกว่า (Frost/Burn/Shock/Bleed/Holy → Shatter/Bloodflame/Superconduct/Holy Conflagration) ใน [GAME_SPEC.md §4.2](GAME_SPEC.md)
+
+**Co-op Mechanics**
+- [x] Dynamic HP/Density Scaling ตามจำนวนผู้เล่น — มีจริง: `COOP_HP_SCALE_PER_PLAYER` (+35%/คน) และ `COOP_SPAWN_SCALE_PER_PLAYER` (+25%/คน) ใน [constants.ts](src/shared/constants.ts), ใช้งานจริงใน [GameRoom.ts:395](src/server/engine/GameRoom.ts:395) และ [HordeDirector.ts:103](src/server/engine/HordeDirector.ts:103) (ตัวเลข % ต่างจากที่ระบุไว้ (+40%) แต่กลไกเดียวกัน)
+- [x] Shared EXP Orb Pool — มีจริงตรงตามที่อธิบาย โค้ดมีคอมเมนต์ "SHARED EXP for all teammates!" ที่ [GameRoom.ts:2231](src/server/engine/GameRoom.ts:2231)
+- [x] Soul Beacon (ยืนชุบชีวิตเพื่อน) — มีจริง: revive circle/timer/ฟื้นที่ 50% HP ใน [ServerPlayer.ts:294](src/server/entities/ServerPlayer.ts:294) + [GameRoom.ts:336](src/server/engine/GameRoom.ts:336) (รัศมี/เวลาต่างจากที่ระบุเล็กน้อย: 100px/4.0s)
+- [ ] Wellkeeper Shared Haul (ทีมปลดล็อกเกียร์ที่เพื่อนส่งบ่อน้ำร่วมกัน) — ช่องว่างเดียวกับ Well Shrine ด้านบน
+
+**Architecture (ภาคที่ 2)**
+- [🔄] Three.js InstancedMesh แบบ 3D ล้วน + Binary-packed WebSocket state — ของจริงใช้ JSON over WebSocket ([types.ts](src/shared/types.ts)) แบบ hybrid 3D (Three.js) + 2D Canvas ไม่ได้ pack เป็น binary
+- [x] Node.js authoritative server + Spatial Hash Grid + tick 20Hz — มีจริง ตรงกับ [GAME_SPEC.md §8.1](GAME_SPEC.md)
+- [ ] Export เป็น `.exe` ด้วย Tauri สำหรับ Steam — ไม่พบ Tauri config/dependency ในโปรเจกต์
+
+**Legend:** [x] Implemented ・ [~] Partial ・ [ ] Not implemented ・ [🔄] Superseded by a different actual implementation
+
 ---
 
 ## ภาคที่ 1: Game Specification (สเปกเกมและระบบเกมแบบละเอียด)
