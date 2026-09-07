@@ -18,6 +18,10 @@ export class MiniMap {
   private lootBadge: HTMLElement | null = null;
   private zoomBtn: HTMLElement | null = null;
   private currentShrines: ShrineData[] = [];
+  // The radar canvas size never changes post-construction, so this gradient's inputs
+  // (cx, cy, rimRadius) never change either — build it once instead of every update()
+  // call (20-25Hz), which was previously reallocating a gradient every single tick.
+  private cachedBgGrad: CanvasGradient | null = null;
 
   constructor(parent: HTMLElement) {
     this.container = document.createElement('div');
@@ -100,12 +104,15 @@ export class MiniMap {
     ctx.arc(cx, cy, rimRadius, 0, Math.PI * 2);
     ctx.clip();
 
-    // Background gradient: Dark obsidian dungeon stone
-    const bgGrad = ctx.createRadialGradient(cx, cy, 10, cx, cy, rimRadius);
-    bgGrad.addColorStop(0, '#0d131f');
-    bgGrad.addColorStop(0.7, '#070a10');
-    bgGrad.addColorStop(1, '#030508');
-    ctx.fillStyle = bgGrad;
+    // Background gradient: Dark obsidian dungeon stone (cached — see field comment)
+    if (!this.cachedBgGrad) {
+      const bgGrad = ctx.createRadialGradient(cx, cy, 10, cx, cy, rimRadius);
+      bgGrad.addColorStop(0, '#0d131f');
+      bgGrad.addColorStop(0.7, '#070a10');
+      bgGrad.addColorStop(1, '#030508');
+      this.cachedBgGrad = bgGrad;
+    }
+    ctx.fillStyle = this.cachedBgGrad;
     ctx.fillRect(0, 0, w, h);
 
     // Concentric Range Rings

@@ -2,6 +2,7 @@ import { GameStateTick, PlayerNetworkData, PlayerClass, ShrineType } from '../..
 import { CLASS_DEFINITIONS, TRAIT_POOL } from '../../shared/classes';
 import { I18n } from '../engine/I18n';
 import { SoundManager } from '../engine/SoundManager';
+import { GraphicsSettings, GraphicsQuality } from '../engine/GraphicsSettings';
 
 export class EscMenuUI {
   private container: HTMLElement;
@@ -212,6 +213,9 @@ export class EscMenuUI {
             <button id="btn-esc-lang" class="btn-esc-aux">
               ${isTh ? '🇹🇭 ภาษาไทย' : '🇬🇧 English'}
             </button>
+            <button id="btn-esc-graphics" class="btn-esc-aux">
+              ${this.graphicsLabel()}
+            </button>
             <div class="esc-volume-wrap">
               <button id="btn-esc-vol-mute" class="btn-esc-vol">🔊</button>
               <input type="range" id="esc-vol-slider" class="esc-slider" min="0" max="100" value="30" />
@@ -281,6 +285,13 @@ export class EscMenuUI {
     // Language Toggle
     document.getElementById('btn-esc-lang')?.addEventListener('click', () => {
       I18n.toggleLanguage();
+    });
+
+    // Graphics Quality Cycle (Low -> Medium -> High -> Low)
+    document.getElementById('btn-esc-graphics')?.addEventListener('click', () => {
+      GraphicsSettings.cycleQuality();
+      const graphicsBtn = document.getElementById('btn-esc-graphics');
+      if (graphicsBtn) graphicsBtn.textContent = this.graphicsLabel();
     });
 
     // Sound Controls
@@ -503,7 +514,7 @@ export class EscMenuUI {
 
     const timeEl = document.getElementById('esc-crusade-time');
     if (timeEl) {
-      const totalSec = Math.max(0, 1800 - Math.round(tick.timeRemaining));
+      const totalSec = Math.max(0, Math.round(tick.elapsedTime));
       const mm = Math.floor(totalSec / 60).toString().padStart(2, '0');
       const ss = (totalSec % 60).toString().padStart(2, '0');
       timeEl.textContent = `${mm}:${ss}`;
@@ -513,7 +524,10 @@ export class EscMenuUI {
     if (killsEl) killsEl.textContent = tick.totalKills.toString();
 
     const goldEl = document.getElementById('esc-crusade-gold');
-    if (goldEl) goldEl.textContent = tick.teamGold.toString();
+    if (goldEl) {
+      const me = tick.players.find((p) => p.id === myId);
+      goldEl.textContent = (me?.gold ?? 0).toString();
+    }
 
     // 6. Party Members Table
     const partyList = document.getElementById('esc-party-list');
@@ -546,6 +560,12 @@ export class EscMenuUI {
     }
   }
 
+  private graphicsLabel(): string {
+    const quality: GraphicsQuality = GraphicsSettings.getQuality();
+    const key = quality === 'low' ? 'esc.graphics_low' : quality === 'high' ? 'esc.graphics_high' : 'esc.graphics_medium';
+    return `${I18n.t('esc.graphics_prefix')} ${I18n.t(key)}`;
+  }
+
   public updateStaticLabels(): void {
     const isTh = I18n.getLanguage() === 'th';
 
@@ -563,6 +583,9 @@ export class EscMenuUI {
 
     const langBtn = document.getElementById('btn-esc-lang');
     if (langBtn) langBtn.textContent = isTh ? '🇹🇭 ภาษาไทย' : '🇬🇧 English';
+
+    const graphicsBtn = document.getElementById('btn-esc-graphics');
+    if (graphicsBtn) graphicsBtn.textContent = this.graphicsLabel();
 
     const resumeBtn = document.getElementById('btn-esc-resume');
     if (resumeBtn) resumeBtn.textContent = I18n.t('esc.btn_resume');

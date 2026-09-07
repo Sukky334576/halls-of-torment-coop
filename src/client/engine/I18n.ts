@@ -256,7 +256,13 @@ const TRANSLATIONS: TranslationKeys = {
     en: 'Are you sure you want to abandon the crusade? Gold earned in this run will be safely brought back to Sanctuary.'
   },
   'esc.btn_confirm_surrender': { th: 'ยอมแพ้ทันที', en: 'Surrender Now' },
-  'esc.btn_cancel_surrender': { th: 'กลับไปสู้ต่อ', en: 'Keep Fighting' }
+  'esc.btn_cancel_surrender': { th: 'กลับไปสู้ต่อ', en: 'Keep Fighting' },
+
+  // Graphics Quality Toggle
+  'esc.graphics_prefix': { th: '🖥️ กราฟิก:', en: '🖥️ Graphics:' },
+  'esc.graphics_low': { th: 'ต่ำ (ประหยัดสุด)', en: 'Low (Best Performance)' },
+  'esc.graphics_medium': { th: 'กลาง', en: 'Medium' },
+  'esc.graphics_high': { th: 'สูง', en: 'High' }
 };
 
 class I18nService {

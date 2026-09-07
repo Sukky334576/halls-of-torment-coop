@@ -1,5 +1,6 @@
 import { MonsterType } from '../../shared/types';
 import { STAGES } from '../../shared/stages';
+import { GraphicsSettings } from './GraphicsSettings';
 
 export interface Camera2D {
   x: number;
@@ -62,10 +63,12 @@ export class Renderer2D {
     this.createGothicFloorPattern();
     this.resize();
     window.addEventListener('resize', () => this.resize());
+    GraphicsSettings.onQualityChanged(() => this.resize());
   }
 
   private resize(): void {
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const { dprCap, renderScale } = GraphicsSettings.getProfile();
+    const dpr = Math.min(window.devicePixelRatio || 1, dprCap) * renderScale;
     this.canvas.width = Math.floor(window.innerWidth * dpr);
     this.canvas.height = Math.floor(window.innerHeight * dpr);
     this.ctx.imageSmoothingEnabled = false;
