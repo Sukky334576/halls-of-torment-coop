@@ -14,7 +14,7 @@ import {
   TraitOption
 } from '../../shared/types';
 import { GAME_CONSTANTS } from '../../shared/constants';
-import { TRAIT_POOL, WEAPON_EVOLUTIONS } from '../../shared/classes';
+import { TRAIT_POOL, WEAPON_EVOLUTIONS, getPowerTier, getTierWeight } from '../../shared/classes';
 import { ServerPlayer } from '../entities/ServerPlayer';
 import { ServerMonster, ElementStatus } from '../entities/ServerMonster';
 import { SpatialGrid } from './SpatialGrid';
@@ -80,9 +80,23 @@ export class GameRoom {
   private worldSpawnTimer: number = 0;
   private shrineSpawnTimer: number = 15.0;
 
-  constructor(id: string, sendCallback: (playerId: string, msg: ServerMessage) => void) {
+  private disconnectTimers: Map<string, NodeJS.Timeout> = new Map();
+  private onEmpty?: () => void;
+  // Lets the same broadcast (e.g. the 20-25Hz TICK) be JSON.stringify'd ONCE and sent to
+  // every player, instead of once per recipient — matters most at high monster/projectile
+  // counts where the payload itself is large. Falls back to per-player sends if not wired up.
+  private broadcastCallback?: (msg: ServerMessage) => void;
+
+  constructor(
+    id: string,
+    sendCallback: (playerId: string, msg: ServerMessage) => void,
+    onEmpty?: () => void,
+    broadcastCallback?: (msg: ServerMessage) => void
+  ) {
     this.id = id;
     this.sendCallback = sendCallback;
+    this.onEmpty = onEmpty;
+    this.broadcastCallback = broadcastCallback;
   }
 
   public addPlayer(
@@ -95,7 +109,7 @@ export class GameRoom {
     const player = new ServerPlayer(id, name, playerClass);
     player.initSkillTreeUnlocks(unlockedSkills, treePassives);
 
-    // If game has already started, spawn near an alive teammate and grant catchup stats
+    // If game has already started, spawn near an alive teammate and match the party's level
     if (this.isStarted && this.players.size > 0) {
       const alivePlayer = Array.from(this.players.values()).find((p) => !p.isDead);
       if (alivePlayer) {
@@ -104,8 +118,13 @@ export class GameRoom {
         player.stats.level = alivePlayer.stats.level;
         player.stats.exp = alivePlayer.stats.exp;
         player.stats.maxExp = alivePlayer.stats.maxExp;
-        player.stats.maxHp = Math.round(player.stats.maxHp * (1 + (alivePlayer.stats.level - 1) * 0.08));
         player.stats.hp = player.stats.maxHp;
+
+        // Let them pick their OWN trait cards to catch up (one level-up choice at a
+        // time) instead of inheriting a teammate's build sight-unseen — they're
+        // ghosted (see takeDamage()) for the whole catch-up sequence, so there's no
+        // rush and no risk while they're mid-choice.
+        player.catchUpChoicesRemaining = Math.max(0, alivePlayer.stats.level - 1);
       }
     } else {
       // Spawn near center with slight offset
@@ -114,6 +133,11 @@ export class GameRoom {
       player.y = Math.sin(angle) * 50;
     }
     this.players.set(id, player);
+
+    if (player.catchUpChoicesRemaining > 0) {
+      player.catchUpChoicesRemaining--;
+      this.startLevelUpChoice(player);
+    }
   }
 
   public getStageId(): number {
@@ -121,10 +145,56 @@ export class GameRoom {
   }
 
   public removePlayer(id: string): void {
+    const timer = this.disconnectTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.disconnectTimers.delete(id);
+    }
     this.players.delete(id);
     if (this.players.size === 0) {
       this.stop();
+      this.onEmpty?.();
     }
+  }
+
+  public hasPlayer(id: string): boolean {
+    return this.players.has(id);
+  }
+
+  // A connection dropped mid-match — keep their character alive (ghosted, see
+  // ServerPlayer.takeDamage) for a grace period instead of instantly deleting their
+  // progress, in case it's just a refresh or a flaky connection reconnecting.
+  public disconnectPlayer(id: string): void {
+    const player = this.players.get(id);
+    if (!player) return;
+
+    player.isDisconnected = true;
+    player.isAttacking = false;
+    player.inputMoveX = 0;
+    player.inputMoveY = 0;
+
+    const existing = this.disconnectTimers.get(id);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.disconnectTimers.delete(id);
+      this.removePlayer(id);
+    }, GAME_CONSTANTS.RECONNECT_GRACE_MS);
+    this.disconnectTimers.set(id, timer);
+  }
+
+  // They came back within the grace period — resume the same character (same level,
+  // gold, traits, position) instead of dropping them in as a fresh level-1 late joiner.
+  public reconnectPlayer(id: string): boolean {
+    const player = this.players.get(id);
+    if (!player) return false;
+
+    player.isDisconnected = false;
+    const timer = this.disconnectTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.disconnectTimers.delete(id);
+    }
+    return true;
   }
 
   public getPlayerCount(): number {
@@ -159,6 +229,10 @@ export class GameRoom {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    for (const timer of this.disconnectTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.disconnectTimers.clear();
   }
 
   public handleInput(playerId: string, moveX: number, moveY: number, aimAngle: number, isAttacking: boolean): void {
@@ -190,6 +264,14 @@ export class GameRoom {
       player.lockedTraitId = null;
     }
     player.isChoosingTrait = false;
+
+    // Late joiner catching up to the party's level: queue up their next self-picked card
+    // immediately instead of dropping them into combat mid-catch-up.
+    if (player.catchUpChoicesRemaining > 0) {
+      player.catchUpChoicesRemaining--;
+      this.startLevelUpChoice(player);
+      return;
+    }
 
     // Unpause if no players are currently choosing traits
     let anyChoosing = false;
@@ -269,22 +351,10 @@ export class GameRoom {
     // If solo or last player, trigger room-wide GAME_OVER
     if (this.players.size <= 1) {
       this.isOver = true;
-      this.broadcast({
-        type: 'GAME_OVER',
-        victory: false,
-        survivalTime: Math.round(this.hordeDirector.getElapsedTime()),
-        totalKills: this.totalKills,
-        teamGold: this.teamGold
-      });
+      this.broadcastGameOver(false);
     } else {
       // In co-op, send GAME_OVER directly to surrendering player
-      this.sendCallback(playerId, {
-        type: 'GAME_OVER',
-        victory: false,
-        survivalTime: Math.round(this.hordeDirector.getElapsedTime()),
-        totalKills: this.totalKills,
-        teamGold: this.teamGold
-      });
+      this.sendGameOverTo(player, false);
       player.isDead = true;
       player.stats.hp = 0;
 
@@ -294,13 +364,7 @@ export class GameRoom {
       }
       if (aliveCount === 0) {
         this.isOver = true;
-        this.broadcast({
-          type: 'GAME_OVER',
-          victory: false,
-          survivalTime: Math.round(this.hordeDirector.getElapsedTime()),
-          totalKills: this.totalKills,
-          teamGold: this.teamGold
-        });
+        this.broadcastGameOver(false);
       }
     }
   }
@@ -319,6 +383,10 @@ export class GameRoom {
     this.damageNumbers = [];
 
     // 1. Update Players & Co-op Revive
+    // Two passes: first collect every alive player, then resolve revive circles against the
+    // COMPLETE list. A single combined pass would only see alive teammates that happened to be
+    // inserted earlier in the players Map than the dead player being checked, making revive
+    // succeed or silently fail depending on join order instead of actual proximity.
     let aliveCount = 0;
     const alivePlayers: ServerPlayer[] = [];
 
@@ -332,7 +400,11 @@ export class GameRoom {
         if (player.canAttack()) {
           this.executePlayerAttack(player);
         }
-      } else {
+      }
+    }
+
+    for (const player of this.players.values()) {
+      if (player.isDead) {
         // Dead player: check if alive teammates are in revive circle
         let revivingTeammates = 0;
         for (const aliveP of alivePlayers) {
@@ -360,13 +432,7 @@ export class GameRoom {
     // Check Total Party Wipe
     if (aliveCount === 0 && this.players.size > 0) {
       this.isOver = true;
-      this.broadcast({
-        type: 'GAME_OVER',
-        victory: false,
-        survivalTime: Math.round(this.hordeDirector.getElapsedTime()),
-        totalKills: this.totalKills,
-        teamGold: this.teamGold
-      });
+      this.broadcastGameOver(false);
       return;
     }
 
@@ -522,7 +588,7 @@ export class GameRoom {
             isCrit: true,
             radius: 24,
             lifeTime: 0.22,
-            pierceRemaining: 0,
+            pierceRemaining: 1,
             hitEntityIds: new Set()
           });
         }
@@ -558,7 +624,7 @@ export class GameRoom {
             isCrit: true,
             radius: cycloneRadius,
             lifeTime: 0.20,
-            pierceRemaining: 0,
+            pierceRemaining: 1,
             hitEntityIds: new Set()
           });
         }
@@ -632,7 +698,7 @@ export class GameRoom {
             isCrit: false,
             radius: novaRadius,
             lifeTime: 0.35,
-            pierceRemaining: 0,
+            pierceRemaining: 1,
             hitEntityIds: new Set()
           });
         }
@@ -684,7 +750,7 @@ export class GameRoom {
             isCrit: true,
             radius: holyRadius,
             lifeTime: 0.45,
-            pierceRemaining: 0,
+            pierceRemaining: 1,
             hitEntityIds: new Set()
           });
         }
@@ -717,7 +783,7 @@ export class GameRoom {
                 isCrit: true,
                 radius: 50 * player.stats.areaMultiplier,
                 lifeTime: 0.4,
-                pierceRemaining: 0,
+                pierceRemaining: 1,
                 hitEntityIds: new Set()
               });
             }
@@ -809,7 +875,7 @@ export class GameRoom {
               isCrit: true,
               radius: blastRadius,
               lifeTime: 0.45,
-              pierceRemaining: 0,
+              pierceRemaining: 1,
               hitEntityIds: new Set()
             });
           }
@@ -860,7 +926,7 @@ export class GameRoom {
               isCrit: true,
               radius: 60 * player.stats.areaMultiplier,
               lifeTime: 0.35,
-              pierceRemaining: 0,
+              pierceRemaining: 1,
               hitEntityIds: new Set()
             });
           }
@@ -923,7 +989,7 @@ export class GameRoom {
             isCrit: true,
             radius: blastRadius,
             lifeTime: 0.40,
-            pierceRemaining: 0,
+            pierceRemaining: 1,
             hitEntityIds: new Set()
           });
 
@@ -978,7 +1044,7 @@ export class GameRoom {
                 isCrit: true,
                 radius: 65 * player.stats.areaMultiplier,
                 lifeTime: 0.35,
-                pierceRemaining: 0,
+                pierceRemaining: 1,
                 hitEntityIds: new Set()
               });
             }
@@ -1016,7 +1082,7 @@ export class GameRoom {
               isCrit: true,
               radius: tauntRadius,
               lifeTime: 0.45,
-              pierceRemaining: 0,
+              pierceRemaining: 1,
               hitEntityIds: new Set()
             });
           }
@@ -1084,7 +1150,7 @@ export class GameRoom {
             isCrit: true,
             radius: lassoRadius,
             lifeTime: 0.38,
-            pierceRemaining: 0,
+            pierceRemaining: 1,
             hitEntityIds: new Set()
           });
         }
@@ -1193,7 +1259,7 @@ export class GameRoom {
             isCrit: true,
             radius: jackpotRadius,
             lifeTime: 0.55,
-            pierceRemaining: 0,
+            pierceRemaining: 1,
             hitEntityIds: new Set()
           });
         }
@@ -1240,7 +1306,7 @@ export class GameRoom {
             isCrit,
             radius: wwRadius,
             lifeTime: 0.28,
-            pierceRemaining: 0,
+            pierceRemaining: 1,
             hitEntityIds: new Set()
           });
 
@@ -1360,7 +1426,7 @@ export class GameRoom {
             isCrit: true,
             radius: bastionRadius,
             lifeTime: 0.35,
-            pierceRemaining: 0,
+            pierceRemaining: 1,
             hitEntityIds: new Set()
           });
         }
@@ -1459,7 +1525,7 @@ export class GameRoom {
               isCrit: true,
               radius: 65 * stats.areaMultiplier,
               lifeTime: 0.35,
-              pierceRemaining: 0,
+              pierceRemaining: 1,
               hitEntityIds: new Set()
             });
             this.damageMonster(primary, Math.round(finalDamage * 1.5), true, 'SHOCK');
@@ -1474,6 +1540,24 @@ export class GameRoom {
             hitIds.add(nextTarget.id);
             this.damageMonster(nextTarget, Math.round(finalDamage * (isWrath ? 0.95 : 0.75)), isCrit, 'SHOCK');
 
+            // Visual bolt for THIS bounce hop specifically — without it, only the very
+            // first player->primary strike was ever visible and every subsequent bounce
+            // (up to 12 targets for Wrath of the Thunder God) dealt damage with no arc shown.
+            this.projectiles.push({
+              id: ++this.nextProjId,
+              type: ProjectileType.CHAIN_LIGHTNING,
+              x: currentTarget.x,
+              y: currentTarget.y,
+              vx: nextTarget.x,
+              vy: nextTarget.y,
+              damage: 0,
+              isCrit,
+              radius: 16,
+              lifeTime: 0.20,
+              pierceRemaining: 1,
+              hitEntityIds: new Set()
+            });
+
             if (isWrath && isCrit) {
               this.projectiles.push({
                 id: ++this.nextProjId,
@@ -1486,7 +1570,7 @@ export class GameRoom {
                 isCrit: true,
                 radius: 55 * stats.areaMultiplier,
                 lifeTime: 0.30,
-                pierceRemaining: 0,
+                pierceRemaining: 1,
                 hitEntityIds: new Set()
               });
               this.damageMonster(nextTarget, Math.round(finalDamage * 1.2), true, 'SHOCK');
@@ -1506,7 +1590,7 @@ export class GameRoom {
             isCrit,
             radius: 16,
             lifeTime: 0.20,
-            pierceRemaining: 0,
+            pierceRemaining: 1,
             hitEntityIds: new Set()
           });
         }
@@ -1535,7 +1619,7 @@ export class GameRoom {
           isCrit,
           radius: smiteRadius,
           lifeTime: 0.35,
-          pierceRemaining: 0,
+          pierceRemaining: 1,
           hitEntityIds: new Set()
         });
         break;
@@ -1601,7 +1685,7 @@ export class GameRoom {
           isCrit,
           radius: slamRadius,
           lifeTime: isTitan ? 0.40 : 0.28,
-          pierceRemaining: 0,
+          pierceRemaining: 1,
           hitEntityIds: new Set()
         });
         break;
@@ -1670,7 +1754,7 @@ export class GameRoom {
           isCrit,
           radius: saberRadius,
           lifeTime: 0.26,
-          pierceRemaining: 0,
+          pierceRemaining: 1,
           hitEntityIds: new Set()
         });
         break;
@@ -1742,6 +1826,13 @@ export class GameRoom {
           }
         }
         this.projectiles.splice(i, 1);
+        continue;
+      }
+
+      if (p.type === ProjectileType.MAGNET_PULL_SPARK) {
+        // Pure decoration: travels toward the collector, no collision/damage at all.
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
         continue;
       }
 
@@ -1869,7 +1960,7 @@ export class GameRoom {
                   isCrit: true,
                   radius: cRadius,
                   lifeTime: 0.35 + c * 0.08,
-                  pierceRemaining: 0,
+                  pierceRemaining: 1,
                   hitEntityIds: new Set()
                 });
               }
@@ -1916,7 +2007,7 @@ export class GameRoom {
                 isCrit: false,
                 radius: shockRadius,
                 lifeTime: 0.22,
-                pierceRemaining: 0,
+                pierceRemaining: 1,
                 hitEntityIds: new Set()
               });
             }
@@ -1949,7 +2040,7 @@ export class GameRoom {
             isCrit: false,
             radius: freezeRadius,
             lifeTime: 0.25,
-            pierceRemaining: 0,
+            pierceRemaining: 1,
             hitEntityIds: new Set()
           });
         }
@@ -2107,6 +2198,18 @@ export class GameRoom {
         });
       }
 
+      // Chance to drop a Magnet: instantly vacuums every EXP gem & gold coin on the map to the team
+      if (Math.random() < GAME_CONSTANTS.MAGNET_DROP_CHANCE) {
+        this.pickups.push({
+          id: ++this.nextPickupId,
+          type: PickupType.MAGNET,
+          x: dropX,
+          y: dropY,
+          value: 0,
+          radius: 16
+        });
+      }
+
       // Boss Defeat Rewards: drops 3 gold coins scaled by stage + Tome of Greater Ascension
       if (monster.isBoss) {
         if (monster.bossName !== 'Elite Void Guardian') {
@@ -2137,20 +2240,16 @@ export class GameRoom {
         // Check Ultimate Final Boss Defeat
         if (monster.type === MonsterType.LORD_OF_TORMENT) {
           this.isOver = true;
-          this.broadcast({
-            type: 'GAME_OVER',
-            victory: true,
-            survivalTime: Math.round(this.hordeDirector.getElapsedTime()),
-            totalKills: this.totalKills,
-            teamGold: this.teamGold,
-            clearedStageId: this.stageId
-          });
+          this.broadcastGameOver(true, this.stageId);
         }
       }
     }
   }
 
   private updatePickups(alivePlayers: ServerPlayer[], dt: number): void {
+    let magnetCollected = false;
+    let magnetCollector: ServerPlayer | null = null;
+
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const p = this.pickups[i];
 
@@ -2173,18 +2272,121 @@ export class GameRoom {
 
           if (dist <= player.radius + p.radius) {
             // Collected!
-            this.handlePickupCollection(p);
+            this.handlePickupCollection(p, player);
+            if (p.type === PickupType.MAGNET) {
+              magnetCollected = true;
+              magnetCollector = player;
+            }
             this.pickups.splice(i, 1);
             break;
           }
         }
       }
     }
+
+    // Handled after the index-based loop above finishes: sweeping the whole map's EXP/gold
+    // here would resize `this.pickups` mid-iteration and desync the `i` index in that loop.
+    if (magnetCollected && magnetCollector) {
+      this.collectMagnetPulse(magnetCollector);
+    }
   }
 
-  private handlePickupCollection(pickup: Pickup): void {
+  private collectMagnetPulse(collector: ServerPlayer): void {
+    let expGained = 0;
+    let goldGained = 0;
+    for (const p of this.pickups) {
+      if (p.type === PickupType.EXP_GEM_SMALL || p.type === PickupType.EXP_GEM_MEDIUM || p.type === PickupType.EXP_GEM_LARGE) {
+        expGained += p.value;
+      } else if (p.type === PickupType.GOLD_COIN) {
+        goldGained += p.value;
+      }
+
+      // Purely decorative: a little spark visibly flies from the swept item's last
+      // position to whoever triggered the magnet. Doesn't touch the actual reward
+      // logic below at all — cosmetic only, per the "don't touch the mechanic" call.
+      if (
+        p.type === PickupType.EXP_GEM_SMALL || p.type === PickupType.EXP_GEM_MEDIUM ||
+        p.type === PickupType.EXP_GEM_LARGE || p.type === PickupType.GOLD_COIN
+      ) {
+        const dist = Math.hypot(collector.x - p.x, collector.y - p.y) || 1;
+        const lifeTime = 0.45;
+        const speed = dist / lifeTime;
+        this.projectiles.push({
+          id: ++this.nextProjId,
+          type: ProjectileType.MAGNET_PULL_SPARK,
+          x: p.x,
+          y: p.y,
+          vx: ((collector.x - p.x) / dist) * speed,
+          vy: ((collector.y - p.y) / dist) * speed,
+          damage: 0,
+          isCrit: p.type === PickupType.GOLD_COIN,
+          radius: 6,
+          lifeTime,
+          pierceRemaining: 1,
+          hitEntityIds: new Set()
+        });
+      }
+    }
+
+    this.pickups = this.pickups.filter((p) =>
+      p.type !== PickupType.EXP_GEM_SMALL &&
+      p.type !== PickupType.EXP_GEM_MEDIUM &&
+      p.type !== PickupType.EXP_GEM_LARGE &&
+      p.type !== PickupType.GOLD_COIN
+    );
+
+    // Magnet-swept gold is a shared team bonus (nobody personally walked over these coins),
+    // so split it evenly across whoever's alive right now rather than crediting one person.
+    if (goldGained > 0) {
+      const alive = Array.from(this.players.values()).filter((p) => !p.isDead);
+      if (alive.length > 0) {
+        const share = Math.floor(goldGained / alive.length);
+        for (const player of alive) {
+          player.gold += share;
+        }
+      }
+    }
+
+    // Shared EXP for all teammates, same as picking up a gem directly (alive ones only)
+    if (expGained > 0) {
+      for (const player of this.players.values()) {
+        if (player.isDead) continue;
+        const leveledUp = player.addExp(expGained);
+        if (leveledUp) {
+          player.stats.hp = player.stats.maxHp;
+          this.startLevelUpChoice(player);
+        }
+      }
+    }
+
+    for (const player of this.players.values()) {
+      if (!player.isDead) {
+        this.broadcastDamageNumber(player.x, player.y - 50, 0, true, `🧲 MAGNET! +${expGained} EXP +${goldGained} GOLD`, '#a855f7');
+      }
+    }
+  }
+
+  // Solo: pause like before (nobody else is inconvenienced by it).
+  // Co-op: keep the world running and just ghost the leveling player (see takeDamage()),
+  // so the rest of the team doesn't have to stop and wait on one person's card choice.
+  private startLevelUpChoice(player: ServerPlayer): void {
+    player.isChoosingTrait = true;
+    if (this.players.size <= 1) {
+      this.isPaused = true;
+    }
+    this.triggerLevelUpChoices(player);
+  }
+
+  private handlePickupCollection(pickup: Pickup, collector: ServerPlayer): void {
+    if (pickup.type === PickupType.MAGNET) {
+      // Actual effect (sweeping EXP/gold map-wide) is handled by collectMagnetPulse()
+      // after the caller's index-based pickups loop finishes.
+      return;
+    }
+
     if (pickup.type === PickupType.GOLD_COIN) {
-      this.teamGold += pickup.value;
+      // Personal — whoever walks over a coin keeps it, instead of it going into a shared pot.
+      collector.gold += pickup.value;
       return;
     }
 
@@ -2197,17 +2399,16 @@ export class GameRoom {
       return;
     }
 
-    // Dynamic World Treasure Chest (+8 to 12 Gold + 150 EXP!)
+    // Dynamic World Treasure Chest (+8 to 12 Gold + 150 EXP!) — gold goes to whoever opened it,
+    // EXP stays shared with the team like every other EXP source.
     if (pickup.type === PickupType.TREASURE_CHEST) {
-      this.teamGold += pickup.value;
+      collector.gold += pickup.value;
       for (const player of this.players.values()) {
         if (!player.isDead) {
           const leveledUp = player.addExp(150);
           if (leveledUp) {
             player.stats.hp = player.stats.maxHp;
-            player.isChoosingTrait = true;
-            this.isPaused = true;
-            this.triggerLevelUpChoices(player);
+            this.startLevelUpChoice(player);
           }
         }
       }
@@ -2220,22 +2421,20 @@ export class GameRoom {
         if (!player.isDead) {
           player.stats.level++;
           player.stats.hp = player.stats.maxHp; // 100% Full Heal!
-          player.isChoosingTrait = true;
-          this.isPaused = true;
-          this.triggerLevelUpChoices(player);
+          this.startLevelUpChoice(player);
         }
       }
       return;
     }
 
-    // EXP Gem: SHARED EXP for all teammates!
+    // EXP Gem: SHARED EXP for all teammates (alive ones only — a downed player
+    // shouldn't level up, get the full heal, or pop a trait choice while waiting to be revived)!
     for (const player of this.players.values()) {
+      if (player.isDead) continue;
       const leveledUp = player.addExp(pickup.value);
       if (leveledUp) {
         player.stats.hp = player.stats.maxHp; // 100% Full Heal on Level-Up!
-        player.isChoosingTrait = true;
-        this.isPaused = true;
-        this.triggerLevelUpChoices(player);
+        this.startLevelUpChoice(player);
       }
     }
   }
@@ -2498,11 +2697,7 @@ export class GameRoom {
     }
 
     // 5. Weighted random selection for remaining slots
-    const getTraitWeight = (t: TraitOption): number => {
-      if (t.rarity === 'legendary') return 0.20;
-      if (t.isSignature) return 0.40;
-      return 1.0;
-    };
+    const getTraitWeight = (t: TraitOption): number => getTierWeight(t.rarity, player.stats.tierLuck || 0);
 
     while (selectedTraits.length < 3 && pool.length > 0) {
       const totalWeight = pool.reduce((sum, t) => sum + getTraitWeight(t), 0);
@@ -2521,11 +2716,12 @@ export class GameRoom {
 
     const choices = selectedTraits.map((t) => {
       const curRank = getSkillRank(t.id, player.skills);
-      let displayName = t.name;
-      let displayThaiName = t.thaiName || t.name;
+      const tier = getPowerTier(t.rarity);
+      let displayName = `[${tier}] ${t.name}`;
+      let displayThaiName = `[${tier}] ${t.thaiName || t.name}`;
       if (curRank >= 0) {
-        displayName = `[Rank ${curRank + 1}/3] ${t.name}`;
-        displayThaiName = `[ขั้น ${curRank + 1}/3] ${t.thaiName || t.name}`;
+        displayName = `[${tier} · Rank ${curRank + 1}/3] ${t.name}`;
+        displayThaiName = `[${tier} · ขั้น ${curRank + 1}/3] ${t.thaiName || t.name}`;
       }
       return {
         id: t.id,
@@ -2565,7 +2761,7 @@ export class GameRoom {
   private broadcastTick(): void {
     const tickData: GameStateTick = {
       tick: this.tickCount,
-      timeRemaining: Math.max(0, GAME_CONSTANTS.STAGE_DURATION_SECONDS - this.hordeDirector.getElapsedTime()),
+      elapsedTime: Math.round(this.hordeDirector.getElapsedTime()),
       isPaused: this.isPaused,
       currentWave: this.hordeDirector.getCurrentWave(),
       maxWaves: HordeDirector.MAX_WAVES,
@@ -2591,7 +2787,8 @@ export class GameRoom {
         targetX: Math.round(p.vx),
         targetY: Math.round(p.vy),
         angle: Math.atan2(p.vy, p.vx),
-        radius: p.radius
+        radius: p.radius,
+        isCrit: p.isCrit
       })),
       pickups: this.pickups.map((p) => ({
         id: p.id,
@@ -2624,8 +2821,33 @@ export class GameRoom {
   }
 
   private broadcast(msg: ServerMessage): void {
+    if (this.broadcastCallback) {
+      this.broadcastCallback(msg);
+      return;
+    }
     for (const [id] of this.players) {
       this.sendCallback(id, msg);
+    }
+  }
+
+  // Gold is personal now, so GAME_OVER can't be a single shared broadcast payload —
+  // each player needs their own `personalGold` baked into their copy of the message.
+  private sendGameOverTo(player: ServerPlayer, victory: boolean, clearedStageId?: number): void {
+    this.sendCallback(player.id, {
+      type: 'GAME_OVER',
+      victory,
+      survivalTime: Math.round(this.hordeDirector.getElapsedTime()),
+      totalKills: this.totalKills,
+      teamGold: this.teamGold,
+      personalGold: player.gold,
+      playerCount: this.players.size,
+      clearedStageId
+    });
+  }
+
+  private broadcastGameOver(victory: boolean, clearedStageId?: number): void {
+    for (const player of this.players.values()) {
+      this.sendGameOverTo(player, victory, clearedStageId);
     }
   }
 }

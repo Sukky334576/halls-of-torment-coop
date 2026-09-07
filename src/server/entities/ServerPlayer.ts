@@ -20,6 +20,13 @@ export class ServerPlayer implements GridEntity {
   public attackSeq: number = 0;
   public isDead: boolean = false;
   public isChoosingTrait: boolean = false;
+  // Late joiners pick their own catch-up cards instead of inheriting a teammate's build —
+  // this counts down one level-up choice at a time until they reach the party's level.
+  public catchUpChoicesRemaining: number = 0;
+  // Set while their connection is down but their character is kept alive for a grace
+  // period in case they reconnect (see GameRoom.disconnectPlayer/reconnectPlayer).
+  public isDisconnected: boolean = false;
+  public gold: number = 0; // personal gold collected this run — whoever picks it up keeps it
   public reviveTimer: number = 0; // seconds teammate has stood in revive circle
   public invulnerableTimer: number = 0; // protection timer on start and level up
 
@@ -144,6 +151,9 @@ export class ServerPlayer implements GridEntity {
       if (treePassives.extraLocks !== undefined) {
         this.potionLocks += treePassives.extraLocks;
       }
+      if (treePassives.flatTierLuckPct !== undefined) {
+        this.stats.tierLuck = treePassives.flatTierLuckPct;
+      }
     }
   }
 
@@ -255,7 +265,9 @@ export class ServerPlayer implements GridEntity {
   }
 
   public takeDamage(amount: number): boolean {
-    if (this.isDead || this.invulnerableTimer > 0 || this.dashDuration > 0) return false;
+    // Ghosted while picking a level-up card so co-op doesn't have to pause for the whole team,
+    // and while disconnected so nobody can farm a reconnecting player's idle body for free.
+    if (this.isDead || this.invulnerableTimer > 0 || this.dashDuration > 0 || this.isChoosingTrait || this.isDisconnected) return false;
 
     // Archer Windrunner Evasion (Rank 1: 10%, Rank 2: 18%, Rank 3: 25%)
     if (this.skills?.windrunner) {
@@ -330,9 +342,11 @@ export class ServerPlayer implements GridEntity {
       isAttacking: this.isAttacking,
       attackSeq: this.attackSeq,
       isDead: this.isDead,
+      isChoosingTrait: this.isChoosingTrait,
       level: this.stats.level,
       exp: this.stats.exp,
       maxExp: this.stats.maxExp,
+      gold: this.gold,
       skills: this.skills,
       areaMultiplier: this.stats.areaMultiplier,
       isDashing: this.dashDuration > 0,

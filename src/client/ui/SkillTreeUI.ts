@@ -181,10 +181,56 @@ export class SkillTreeUI {
         <!-- Floating POE Dark Fantasy Tooltip -->
         <div id="poe-node-tooltip" class="poe-node-tooltip" style="display: none;"></div>
       </div>
+
+      <!-- Allocation Confirmation Sub-Modal -->
+      <div id="skilltree-confirm-modal" class="esc-confirm-backdrop" style="display: none;">
+        <div class="esc-confirm-card">
+          <div class="confirm-icon">🌌</div>
+          <h3 id="skilltree-confirm-title" class="confirm-title">Allocate Node?</h3>
+          <p id="skilltree-confirm-msg" class="confirm-msg"></p>
+          <div class="confirm-actions">
+            <button id="btn-skilltree-confirm-cancel" class="btn-esc-aux">Cancel</button>
+            <button id="btn-skilltree-confirm-ok" class="btn-esc-primary">Confirm</button>
+          </div>
+        </div>
+      </div>
     `;
 
     this.bindViewportInteractions();
     this.bindNodeClicks();
+  }
+
+  private showAllocateConfirm(node: SkillTreeNode): void {
+    const modal = document.getElementById('skilltree-confirm-modal');
+    const msg = document.getElementById('skilltree-confirm-msg');
+    const okBtn = document.getElementById('btn-skilltree-confirm-ok');
+    const cancelBtn = document.getElementById('btn-skilltree-confirm-cancel');
+    if (!modal || !msg || !okBtn || !cancelBtn) return;
+
+    // This modal matches the rest of SkillTreeUI, which is English-only (no I18n usage
+    // elsewhere in this file) — kept consistent rather than partially localizing just this bit.
+    msg.textContent = `Spend ${node.cost} Gold to permanently unlock "${node.name}"?`;
+    modal.style.display = 'flex';
+
+    const cleanup = () => {
+      modal.style.display = 'none';
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+    const onOk = () => {
+      cleanup();
+      if (MetaProgression.allocateNode(node)) {
+        this.sound?.playLevelUp();
+        this.onDataChanged();
+        this.render();
+        this.hoveredNode = node;
+        this.showTooltip(node);
+      }
+    };
+    const onCancel = () => cleanup();
+
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
   }
 
   private renderSvgBranches(tree: ClassSkillTree): string {
@@ -405,14 +451,7 @@ export class SkillTreeUI {
 
         const canCheck = MetaProgression.canAllocateNode(node);
         if (canCheck.can) {
-          if (MetaProgression.allocateNode(node)) {
-            this.sound?.playLevelUp();
-            this.onDataChanged();
-            this.render();
-            // Show updated tooltip
-            this.hoveredNode = node;
-            this.showTooltip(node);
-          }
+          this.showAllocateConfirm(node);
         } else {
           // Shake node for rejection feedback
           nodeEl.classList.add('node-shake');

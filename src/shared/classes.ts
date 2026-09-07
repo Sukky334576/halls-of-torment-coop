@@ -583,6 +583,67 @@ export const WEAPON_EVOLUTIONS: WeaponEvolutionRule[] = [
   }
 ];
 
+// Power tier list (S = best/rarest, D = weakest/most common), derived from each card's
+// existing rarity so every one of the 78 trait cards gets a tier without hand-grading each
+// individually. Drives both the level-up choice weighting and the "[Tier]" label shown to players.
+export type PowerTier = 'S' | 'A' | 'B' | 'C' | 'D';
+
+const RARITY_TO_TIER: Record<TraitOption['rarity'], PowerTier> = {
+  mythic: 'S',
+  legendary: 'A',
+  epic: 'B',
+  rare: 'C',
+  common: 'D'
+};
+
+export function getPowerTier(rarity: TraitOption['rarity']): PowerTier {
+  return RARITY_TO_TIER[rarity] || 'C';
+}
+
+// Lower weight = rarer. S-tier cards should feel like a special find; D-tier fills out the pool.
+const TIER_WEIGHT: Record<PowerTier, number> = {
+  S: 0.15,
+  A: 0.30,
+  B: 0.60,
+  C: 1.0,
+  D: 1.3
+};
+
+// How strongly "Luck" (from the Fortune's Favor skill tree keystone) pulls each tier's
+// weight up or down. S/A become more likely, C/D less likely; B is the neutral baseline.
+// 100 luck = the full swing below; luck is clamped so odds can shift but never invert or go negative.
+const TIER_LUCK_SENSITIVITY: Record<PowerTier, number> = {
+  S: 2.5,
+  A: 1.5,
+  B: 0,
+  C: -0.5,
+  D: -0.85
+};
+
+export function getTierWeight(rarity: TraitOption['rarity'], luckPct: number = 0): number {
+  const tier = getPowerTier(rarity);
+  const baseWeight = TIER_WEIGHT[tier];
+  if (!luckPct) return baseWeight;
+
+  const luckFraction = Math.max(0, Math.min(1, luckPct / 100));
+  const luckMultiplier = 1 + luckFraction * TIER_LUCK_SENSITIVITY[tier];
+  return Math.max(0.02, baseWeight * luckMultiplier);
+}
+
+// Effect-size multiplier per tier (opposite direction from TIER_WEIGHT): a card's own
+// magnitude should scale with how rare it is to draw, not just its odds of appearing.
+// C is the baseline (existing hand-tuned numbers are left as-is); D is deliberately
+// weaker since it's drawn far more often, S/A/B are stronger since they're rarer finds.
+// Reference for hand-computing a card's literal apply() numbers — see the universal
+// (non-class) trait cards below for worked examples ("base X * tier multiplier = Y").
+export const TIER_POWER_MULTIPLIER: Record<PowerTier, number> = {
+  S: 2.2,
+  A: 1.7,
+  B: 1.35,
+  C: 1.0,
+  D: 0.7
+};
+
 export const TRAIT_POOL: TraitOption[] = [
   // ==========================================
   // 0. MYTHIC WEAPON EVOLUTIONS (8 Ultimate Unions)
@@ -1732,11 +1793,13 @@ export const TRAIT_POOL: TraitOption[] = [
     id: 'vitality_1',
     name: 'Iron Constitution',
     thaiName: 'กายาเหล็กไหล (เลือดสูงสุด)',
-    description: '+50 Max HP and restores 50 HP immediately',
-    thaiDesc: 'เพิ่มพลังชีวิตสูงสุด +50 HP และฟื้นฟูเลือดทันที 50 HP',
+    // D-tier: base 50 HP * TIER_POWER_MULTIPLIER.D (0.7) = 35 — weaker than the C-tier
+    // universal cards below since D is drawn far more often (see TIER_WEIGHT).
+    description: '+35 Max HP and restores 35 HP immediately',
+    thaiDesc: 'เพิ่มพลังชีวิตสูงสุด +35 HP และฟื้นฟูเลือดทันที 35 HP',
     rarity: 'common',
     icon: '❤️',
-    apply: (s) => { s.maxHp += 50; s.hp = Math.min(s.maxHp, s.hp + 50); }
+    apply: (s) => { s.maxHp += 35; s.hp = Math.min(s.maxHp, s.hp + 35); }
   },
   {
     id: 'strength_1',
@@ -1772,11 +1835,12 @@ export const TRAIT_POOL: TraitOption[] = [
     id: 'magnet_1',
     name: 'Soul Siphon Attunement',
     thaiName: 'แรงดึงดูดวิญญาณ (ระยะเก็บของ)',
-    description: '+22% EXP and Item Pickup Radius',
-    thaiDesc: 'เพิ่มระยะการดูดเก็บ EXP และไอเทมบนพื้น +22%',
+    // D-tier: base 22% * TIER_POWER_MULTIPLIER.D (0.7) = 15.4% ≈ 15%
+    description: '+15% EXP and Item Pickup Radius',
+    thaiDesc: 'เพิ่มระยะการดูดเก็บ EXP และไอเทมบนพื้น +15%',
     rarity: 'common',
     icon: '🧲',
-    apply: (s) => { s.pickupRadius *= 1.22; }
+    apply: (s) => { s.pickupRadius *= 1.15; }
   },
   {
     id: 'area_expansion_1',

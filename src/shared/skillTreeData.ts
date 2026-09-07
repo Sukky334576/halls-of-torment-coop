@@ -21,6 +21,7 @@ export interface SkillTreeNode {
     pickupRadius?: number;
     damageBonus?: number;
     expMultiplier?: number;
+    tierLuck?: number; // % shift toward rarer (S/A) level-up cards, see getTierWeight()
   };
   signatureSkillId?: string; // Maps to signature ability in TRAIT_POOL
 }
@@ -2744,9 +2745,22 @@ export const CLASS_SKILL_TREES: Record<string, ClassSkillTree> = {
         cost: 160,
         x: 720,
         y: 370,
-        connections: ['uni_exp_branch_right'],
+        connections: ['uni_exp_branch_right', 'uni_luck_keystone'],
         description: 'NOTABLE: +5% Permanent EXP Multiplier & +25% Item Pickup Radius.',
         stats: { expMultiplier: 5, pickupRadius: 1 }
+      },
+      uni_luck_keystone: {
+        id: 'uni_luck_keystone',
+        name: "Fortune's Favor (โชคชะตาเป็นใจ)",
+        type: 'keystone',
+        classType: 'universal',
+        icon: '🍀',
+        cost: 260,
+        x: 820,
+        y: 300,
+        connections: ['uni_right_notable'],
+        description: 'KEYSTONE: Skews level-up card odds toward rarer S/A tier picks (+15% Luck) at the expense of common ones.',
+        stats: { tierLuck: 15 }
       }
     }
   }

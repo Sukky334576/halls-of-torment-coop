@@ -42,7 +42,8 @@ export enum PickupType {
   GOLD_COIN = 4,
   WELL_GEAR = 5,
   TOME_OF_ASCENSION = 6,
-  TREASURE_CHEST = 7
+  TREASURE_CHEST = 7,
+  MAGNET = 8
 }
 
 export enum ProjectileType {
@@ -81,7 +82,8 @@ export enum ProjectileType {
   WING_LASER_BEAM = 32,
   GAMBLER_CARD = 33,
   LUCKY_DICE = 34,
-  SLOT_COIN_RAIN = 35
+  SLOT_COIN_RAIN = 35,
+  MAGNET_PULL_SPARK = 36
 }
 
 export enum ShrineType {
@@ -235,6 +237,7 @@ export interface PlayerStats {
   exp: number;
   maxExp: number;
   expMultiplier?: number;
+  tierLuck?: number; // % shift toward rarer (S/A) level-up card tiers, see getTierWeight()
 }
 
 export interface TraitOption {
@@ -265,9 +268,11 @@ export interface PlayerNetworkData {
   isAttacking: boolean;
   attackSeq: number;
   isDead: boolean;
+  isChoosingTrait?: boolean;
   level: number;
   exp: number;
   maxExp: number;
+  gold: number;
   skills?: PlayerSkills;
   areaMultiplier?: number;
   isDashing?: boolean;
@@ -300,6 +305,7 @@ export interface ProjectileNetworkData {
   targetY: number;
   angle: number;
   radius: number;
+  isCrit?: boolean;
 }
 
 export interface PickupNetworkData {
@@ -324,7 +330,7 @@ export interface DamageNumberData {
 
 export interface GameStateTick {
   tick: number;
-  timeRemaining: number;
+  elapsedTime: number;
   isPaused?: boolean;
   currentWave: number;
   maxWaves: number;
@@ -350,6 +356,8 @@ export type ClientMessage =
       playerClass: PlayerClass;
       unlockedSkills?: string[];
       treePassives?: Record<string, number>;
+      partyCode?: string;
+      deviceId?: string;
     }
   | { type: 'READY_UP'; ready: boolean }
   | { type: 'START_GAME'; stageId?: number }
@@ -362,6 +370,7 @@ export type ClientMessage =
   | { type: 'PAUSE_GAME'; isPaused: boolean };
 
 export type ServerMessage =
+  | { type: 'JOIN_REJECTED'; reason: string }
   | { type: 'LOBBY_STATE'; players: { id: string; name: string; playerClass: PlayerClass; ready: boolean }[]; isStarted: boolean; stageId?: number }
   | { type: 'GAME_START'; yourId: string; stageId?: number }
   | { type: 'TICK'; data: GameStateTick }
@@ -392,4 +401,4 @@ export type ServerMessage =
     }
   | { type: 'WELL_GEAR_RETRIEVED'; gearName: string; retrievedBy: string }
   | { type: 'GRANT_GOLD'; amount: number; message: string; thaiMessage: string; grantId?: string }
-  | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; clearedStageId?: number };
+  | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number };

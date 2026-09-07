@@ -265,9 +265,9 @@ export class HUD {
   public update(
     players: PlayerNetworkData[],
     localPlayerId: string,
-    timeRemaining: number,
+    elapsedTime: number,
     totalKills: number,
-    teamGold: number,
+    gold: number,
     damageNumbers: DamageNumberData[],
     camera: { x: number; y: number; zoom: number },
     currentWave: number = 1,
@@ -317,7 +317,7 @@ export class HUD {
         timerEl.textContent = I18n.t('hud.defeat_boss');
         timerEl.style.color = '#ff4d6d';
       } else {
-        const elapsed = Math.max(0, Math.floor(1800 - timeRemaining));
+        const elapsed = Math.max(0, Math.floor(elapsedTime));
         const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
         const secs = Math.floor(elapsed % 60).toString().padStart(2, '0');
         timerEl.textContent = `${mins}:${secs}`;
@@ -329,7 +329,7 @@ export class HUD {
     if (killsEl) killsEl.textContent = totalKills.toString();
 
     const goldEl = document.getElementById('hud-gold');
-    if (goldEl) goldEl.textContent = teamGold.toString();
+    if (goldEl) goldEl.textContent = gold.toString();
 
     // 2. Update Local Player HP & EXP
     const localPlayer = players.find((p) => p.id === localPlayerId);
@@ -589,7 +589,7 @@ export class HUD {
     }
   }
 
-  public showGameOver(victory: boolean, survivalTime: number, totalKills: number, teamGold: number): void {
+  public showGameOver(victory: boolean, survivalTime: number, totalKills: number, goldEarned: number): void {
     const modal = document.getElementById('game-over-modal');
     if (!modal) return;
 
@@ -618,7 +618,7 @@ export class HUD {
     const secs = Math.floor(survivalTime % 60).toString().padStart(2, '0');
     if (timeEl) timeEl.textContent = `${mins}:${secs}`;
     if (killsEl) killsEl.textContent = totalKills.toString();
-    if (goldEl) goldEl.textContent = teamGold.toString();
+    if (goldEl) goldEl.textContent = goldEarned.toString();
   }
 
   public addFloatingMessage(x: number, y: number, text: string, color: string = '#facc15'): void {

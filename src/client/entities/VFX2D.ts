@@ -245,10 +245,12 @@ export class VFX2D {
           const gemColor = isLarge ? '#ef4444' : (isMed ? '#3b82f6' : '#10b981');
           const r = isLarge ? 8 : (isMed ? 6 : 4.5);
 
-          // Glow aura
+          // No shadowBlur here on purpose — EXP gems are the single most numerous entity
+          // in a run (one per kill, 100+ can pile up uncollected) and shadowBlur is one of
+          // the most expensive Canvas2D ops; paying that cost per-gem, per-frame is a real
+          // measured stutter source on low-end hardware. Flat fill + the highlight facet
+          // below still reads clearly as a gem without it.
           ctx.fillStyle = gemColor;
-          ctx.shadowColor = gemColor;
-          ctx.shadowBlur = 8;
           ctx.beginPath();
           ctx.moveTo(0, -r * 1.3);
           ctx.lineTo(r, 0);
@@ -272,9 +274,9 @@ export class VFX2D {
         case PickupType.GOLD_COIN: {
           // Spinning gold coin
           const spin = Math.abs(Math.cos(time * 8 + item.id));
+          // shadowBlur dropped for the same reason as EXP gems above — coins are less
+          // numerous but still add up.
           ctx.fillStyle = '#fbbf24';
-          ctx.shadowColor = '#d97706';
-          ctx.shadowBlur = 6;
           ctx.beginPath();
           ctx.ellipse(0, 0, 6 * spin, 6, 0, 0, Math.PI * 2);
           ctx.fill();
@@ -343,6 +345,27 @@ export class VFX2D {
             ctx.arc(0, 11, 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * pct);
             ctx.stroke();
           }
+          break;
+        }
+
+        case PickupType.MAGNET: {
+          // Horseshoe magnet — pulses and spins slowly to stand out as a rare drop
+          const pulse = 1.0 + Math.sin(time * 5 + item.id) * 0.12;
+          ctx.rotate(Math.sin(time * 1.5) * 0.3);
+          ctx.scale(pulse, pulse);
+          ctx.shadowColor = '#c084fc';
+          ctx.shadowBlur = 16;
+
+          ctx.strokeStyle = '#e879f9';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(0, 0, 8, Math.PI * 0.15, Math.PI * 0.85);
+          ctx.stroke();
+
+          ctx.fillStyle = '#ef4444';
+          ctx.fillRect(-9.5, 0, 4, 6);
+          ctx.fillStyle = '#3b82f6';
+          ctx.fillRect(5.5, 0, 4, 6);
           break;
         }
 
@@ -481,22 +504,38 @@ export class VFX2D {
         }
 
         case ProjectileType.CHAIN_LIGHTNING: {
-          // Arcing Arcane Lightning Bolt
+          // This is a static bolt from the caster/previous link to a specific target point
+          // (server encodes that point in targetX/targetY, not a travel direction), so the
+          // outer rotate(proj.angle) applied above is meaningless here — undo it and draw
+          // a real jagged line at the actual target instead of a small fixed icon.
+          ctx.save();
+          ctx.rotate(-proj.angle);
+
+          const dx = proj.targetX - proj.x;
+          const dy = proj.targetY - proj.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const nx = -dy / dist;
+          const ny = dx / dist;
+          const segments = 6;
+
           ctx.strokeStyle = '#c084fc';
           ctx.shadowColor = '#a855f7';
           ctx.shadowBlur = 12;
           ctx.lineWidth = 3.5;
           ctx.beginPath();
-          ctx.moveTo(-20, 0);
-          ctx.lineTo(-10, -6);
-          ctx.lineTo(0, 6);
-          ctx.lineTo(15, -3);
-          ctx.lineTo(25, 0);
+          ctx.moveTo(0, 0);
+          for (let i = 1; i < segments; i++) {
+            const t = i / segments;
+            const jitter = Math.sin(i * 12.9898 + proj.id) * 10;
+            ctx.lineTo(dx * t + nx * jitter, dy * t + ny * jitter);
+          }
+          ctx.lineTo(dx, dy);
           ctx.stroke();
 
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 1.5;
           ctx.stroke();
+          ctx.restore();
           break;
         }
 
@@ -1300,6 +1339,33 @@ export class VFX2D {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText('🎰 777 🎰', 0, 0);
+          break;
+        }
+
+        case ProjectileType.MAGNET_PULL_SPARK: {
+          // Cosmetic-only: a coin or soul gem visibly streaking toward whoever
+          // triggered the Magnet. isCrit is repurposed here as "is a gold coin"
+          // (vs an EXP gem) rather than an actual critical hit.
+          const color = proj.isCrit ? '#fbbf24' : '#34d399';
+          const glow = proj.isCrit ? '#d97706' : '#059669';
+          const pulse = 0.8 + Math.sin(time * 0.02 + proj.id) * 0.2;
+
+          // Trailing streak pointing back the way it came from
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = 0.5;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(-16, 0);
+          ctx.lineTo(0, 0);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+
+          ctx.fillStyle = color;
+          ctx.shadowColor = glow;
+          ctx.shadowBlur = 10;
+          ctx.beginPath();
+          ctx.arc(0, 0, 5 * pulse, 0, Math.PI * 2);
+          ctx.fill();
           break;
         }
 

@@ -13,6 +13,30 @@ import { MetaProgression } from './engine/MetaProgression';
 import { CLASS_DEFINITIONS } from '../shared/classes';
 import { I18n } from './engine/I18n';
 
+const DEVICE_ID_KEY = 'torment_device_id';
+
+// Stable per-browser identity, independent of any single WebSocket connection, so a
+// refresh or dropped connection can resume the same in-progress character server-side.
+function getOrCreateDeviceId(): string {
+  let id: string | null = null;
+  try {
+    id = localStorage.getItem(DEVICE_ID_KEY);
+  } catch {
+    // localStorage unavailable (private mode, etc.) — fall back to a session-only id.
+  }
+  if (!id) {
+    id = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `dev_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    try {
+      localStorage.setItem(DEVICE_ID_KEY, id);
+    } catch {
+      // Ignore — this device just won't survive a refresh mid-match.
+    }
+  }
+  return id;
+}
+
 class GameApp {
   private ws: WebSocket;
   private myId: string = '';
@@ -47,6 +71,10 @@ class GameApp {
   private lastEnemyProjCount: number = 0;
   private lastWasDead: boolean = false;
   private collectedTomeIds: Set<number> = new Set();
+
+  // Optional invite code carried in the shared link (?code=XXXX), forwarded on every JOIN_LOBBY
+  private readonly partyCode: string | undefined = new URLSearchParams(window.location.search).get('code') || undefined;
+  private readonly deviceId: string = getOrCreateDeviceId();
 
   constructor() {
     (window as any).game = this;
@@ -120,7 +148,9 @@ class GameApp {
           name: this.lobby.getPlayerName(),
           playerClass: c,
           unlockedSkills: MetaProgression.getUnlockedSkillIds(),
-          treePassives: MetaProgression.getPassiveTiersForClass(c)
+          treePassives: MetaProgression.getPassiveTiersForClass(c),
+          partyCode: this.partyCode,
+          deviceId: this.deviceId
         });
       },
       (ready) => {
@@ -133,7 +163,9 @@ class GameApp {
           name: this.lobby.getPlayerName(),
           playerClass: this.selectedClass,
           unlockedSkills: MetaProgression.getUnlockedSkillIds(),
-          treePassives: MetaProgression.getPassiveTiersForClass(this.selectedClass)
+          treePassives: MetaProgression.getPassiveTiersForClass(this.selectedClass),
+          partyCode: this.partyCode,
+          deviceId: this.deviceId
         });
         this.send({ type: 'START_GAME', stageId });
       },
@@ -147,7 +179,9 @@ class GameApp {
         name: newName,
         playerClass: this.selectedClass,
         unlockedSkills: MetaProgression.getUnlockedSkillIds(),
-        treePassives: MetaProgression.getPassiveTiersForClass(this.selectedClass)
+        treePassives: MetaProgression.getPassiveTiersForClass(this.selectedClass),
+        partyCode: this.partyCode,
+        deviceId: this.deviceId
       });
     };
 
@@ -334,7 +368,9 @@ class GameApp {
         name: this.lobby.getPlayerName(),
         playerClass: this.selectedClass,
         unlockedSkills: MetaProgression.getUnlockedSkillIds(),
-        treePassives: MetaProgression.getPassiveTiersForClass(this.selectedClass)
+        treePassives: MetaProgression.getPassiveTiersForClass(this.selectedClass),
+        partyCode: this.partyCode,
+        deviceId: this.deviceId
       });
     };
 
@@ -343,6 +379,11 @@ class GameApp {
         const msg: ServerMessage = JSON.parse(event.data);
 
         switch (msg.type) {
+          case 'JOIN_REJECTED': {
+            this.lobby.showToast(`🔒 ${msg.reason}`);
+            break;
+          }
+
           case 'LOBBY_STATE': {
             this.lobby.updateParty(msg.players, msg.isStarted, msg.stageId);
             break;
@@ -410,8 +451,12 @@ class GameApp {
             this.escMenu.hide();
             document.body.classList.remove('in-game');
             document.body.classList.remove('trait-modal-open');
-            if (msg.teamGold > 0) {
-              MetaProgression.addCoins(msg.teamGold);
+            // personalGold is what this player actually picked up themselves this run;
+            // teamGold/playerCount is the leftover shared/bonus bucket (airdrops, starting gift), split evenly.
+            const sharedShare = Math.floor(msg.teamGold / Math.max(1, msg.playerCount));
+            const totalGoldEarned = msg.personalGold + sharedShare;
+            if (totalGoldEarned > 0) {
+              MetaProgression.addCoins(totalGoldEarned);
               this.lobby.refreshCoins();
             }
             if (msg.victory && msg.clearedStageId) {
@@ -421,13 +466,13 @@ class GameApp {
             MetaProgression.recordRunResults(
               msg.totalKills || 0,
               msg.survivalTime || 0,
-              msg.teamGold || 0,
+              totalGoldEarned,
               0,
               0,
               msg.victory ? (msg.clearedStageId || 1) : undefined
             );
             this.lobby.refreshCoins();
-            this.hud.showGameOver(msg.victory, msg.survivalTime, msg.totalKills, msg.teamGold);
+            this.hud.showGameOver(msg.victory, msg.survivalTime, msg.totalKills, totalGoldEarned);
             break;
           }
         }
@@ -537,9 +582,9 @@ class GameApp {
     this.hud.update(
       data.players,
       this.myId,
-      data.timeRemaining,
+      data.elapsedTime,
       data.totalKills,
-      data.teamGold,
+      me.gold,
       data.damageNumbers,
       this.renderer.camera,
       data.currentWave,

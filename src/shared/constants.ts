@@ -1,7 +1,6 @@
 export const GAME_CONSTANTS = {
   SERVER_TICK_RATE: 25, // 25 updates per second = 40ms per tick
   SERVER_TICK_MS: 40,
-  STAGE_DURATION_SECONDS: 1800, // 30 minutes
   MAP_SIZE: 4500, // 4500 x 4500 expanded tactical playfield
   SPATIAL_CELL_SIZE: 150, // 150x150 grid cell for O(1) broadphase
   
@@ -13,6 +12,10 @@ export const GAME_CONSTANTS = {
   BASE_PICKUP_RADIUS: 80,
   REVIVE_ZONE_RADIUS: 100,
   REVIVE_TIME_SECONDS: 4.0,
+  // How long a disconnected player's character stays alive (ghosted, untargetable) waiting
+  // for them to reconnect (browser refresh, dropped WebSocket) before being removed for real.
+  RECONNECT_GRACE_MS: 60_000,
+  MAGNET_DROP_CHANCE: 0.015, // 1.5% chance per kill — pulls every EXP gem & gold coin on the map to the team when collected
 
   // EXP requirements (nerfed progression by ~30%)
   EXP_BASE: 20,

@@ -219,8 +219,22 @@ export class PlayerSpriteManager {
         ctx.scale(-1, 1);
       }
       ctx.imageSmoothingEnabled = false;
+      if (p.isChoosingTrait) {
+        // Ghosted & untargetable while picking a level-up card — the rest of the
+        // party keeps fighting instead of the whole co-op session freezing for it.
+        ctx.globalAlpha = 0.4 + Math.sin(nowSec * 6) * 0.1;
+      }
       ctx.drawImage(frameCanvas, -36, -63, 72, 72);
       ctx.restore();
+
+      if (p.isChoosingTrait) {
+        ctx.save();
+        ctx.font = '20px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.globalAlpha = 0.85 + Math.sin(nowSec * 6) * 0.15;
+        ctx.fillText('🃏', 0, -78 + Math.sin(nowSec * 3) * 3);
+        ctx.restore();
+      }
 
       // 4. Class-Specific Signature Passives VFX (Continuous Aura)
       const skills = p.skills;

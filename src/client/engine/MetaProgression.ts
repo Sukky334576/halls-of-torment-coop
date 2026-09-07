@@ -262,6 +262,10 @@ export class MetaProgressionManager {
       return { can: false, reason: 'Already Allocated' };
     }
 
+    if (node.classType !== 'universal' && !this.isHeroUnlocked(node.classType)) {
+      return { can: false, reason: 'Unlock this hero first' };
+    }
+
     if (this.data.coins < node.cost) {
       return { can: false, reason: `Need ${node.cost} Coins (Defeat bosses & mobs)` };
     }
@@ -412,7 +416,8 @@ export class MetaProgressionManager {
       flatDamageBonusPct: 0,
       flatExpMultiplierPct: 0,
       flatCritChancePct: 0,
-      flatAttackSpeedPct: 0
+      flatAttackSpeedPct: 0,
+      flatTierLuckPct: 0
     };
 
     // 1. Class-Specific Tree Passives
@@ -425,6 +430,7 @@ export class MetaProgressionManager {
           if (node.stats?.moveSpeed) statsTotal.flatMoveSpeedPct += node.stats.moveSpeed * 6;
           if (node.stats?.pickupRadius) statsTotal.flatPickupRadiusPct += node.stats.pickupRadius * 25;
           if (node.stats?.damageBonus) statsTotal.flatDamageBonusPct += node.stats.damageBonus * 8;
+          if (node.stats?.tierLuck) statsTotal.flatTierLuckPct += node.stats.tierLuck;
         }
       }
     }
@@ -440,6 +446,7 @@ export class MetaProgressionManager {
           if (node.stats?.moveSpeed) statsTotal.flatMoveSpeedPct += node.stats.moveSpeed * 6;
           if (node.stats?.pickupRadius) statsTotal.flatPickupRadiusPct += node.stats.pickupRadius * 25;
           if (node.stats?.damageBonus) statsTotal.flatDamageBonusPct += node.stats.damageBonus * 8;
+          if (node.stats?.tierLuck) statsTotal.flatTierLuckPct += node.stats.tierLuck;
         }
       }
     }
