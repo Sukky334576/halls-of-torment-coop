@@ -381,11 +381,13 @@ export type ServerMessage =
         name: string;
         desc: string;
         rarity: string;
+        tier: string; // S/A/B/C/D power tier derived from rarity, see getPowerTier()
         icon: string;
         thaiName?: string;
         thaiDesc?: string;
         isEvolution?: boolean;
         evolutionTitle?: string;
+        isSignature?: boolean; // Personal/signature class skill vs. a universal card
       }[];
       potionRerolls?: number;
       potionBanishes?: number;

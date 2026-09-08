@@ -2717,11 +2717,11 @@ export class GameRoom {
     const choices = selectedTraits.map((t) => {
       const curRank = getSkillRank(t.id, player.skills);
       const tier = getPowerTier(t.rarity);
-      let displayName = `[${tier}] ${t.name}`;
-      let displayThaiName = `[${tier}] ${t.thaiName || t.name}`;
+      let displayName = t.name;
+      let displayThaiName = t.thaiName || t.name;
       if (curRank >= 0) {
-        displayName = `[${tier} · Rank ${curRank + 1}/3] ${t.name}`;
-        displayThaiName = `[${tier} · ขั้น ${curRank + 1}/3] ${t.thaiName || t.name}`;
+        displayName = `${t.name} (Rank ${curRank + 1}/3)`;
+        displayThaiName = `${t.thaiName || t.name} (ขั้น ${curRank + 1}/3)`;
       }
       return {
         id: t.id,
@@ -2730,9 +2730,11 @@ export class GameRoom {
         thaiName: displayThaiName,
         thaiDesc: t.thaiDesc || t.description,
         rarity: t.rarity,
+        tier,
         icon: t.icon,
         isEvolution: t.isEvolution,
-        evolutionTitle: t.evolutionTitle
+        evolutionTitle: t.evolutionTitle,
+        isSignature: t.isSignature
       };
     });
 

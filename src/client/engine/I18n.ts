@@ -118,6 +118,7 @@ const TRANSLATIONS: TranslationKeys = {
     en: 'THE TORMENT YIELDS ITS ANCIENT POWER TO YOUR CRUSADE'
   },
   'trait.click_hint': { th: 'คลิกเพื่อรับพลัง', en: 'CLICK TO EMBRACE' },
+  'trait.signature_badge': { th: '⭐ สกิลประจำตัว', en: '⭐ SIGNATURE SKILL' },
   'potion.reroll': { th: '🎲 รีโรล ({n})', en: '🎲 Reroll ({n})' },
   'potion.banish': { th: '🚫 แบนการ์ด ({n})', en: '🚫 Banish ({n})' },
   'potion.banish_active': { th: '🚫 คลิกการ์ดเพื่อแบนถาวร!', en: '🚫 Click card to banish forever!' },

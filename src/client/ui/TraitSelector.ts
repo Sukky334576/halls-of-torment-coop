@@ -5,11 +5,13 @@ export interface TraitChoiceView {
   name: string;
   desc: string;
   rarity: string;
+  tier: string;
   icon: string;
   thaiName?: string;
   thaiDesc?: string;
   isEvolution?: boolean;
   evolutionTitle?: string;
+  isSignature?: boolean;
 }
 
 export interface PotionState {
@@ -105,6 +107,9 @@ export class TraitSelector {
               const evoBadge = isEvo
                 ? `<div class="trait-evolution-badge">${c.evolutionTitle || I18n.t('potion.evolution_badge')}</div>`
                 : '';
+              const signatureBadge = c.isSignature
+                ? `<div class="trait-signature-badge">${I18n.t('trait.signature_badge')}</div>`
+                : '';
               const lockedBadge = isLocked
                 ? `<div class="card-locked-badge">${I18n.t('potion.locked_tag')}</div>`
                 : '';
@@ -120,8 +125,9 @@ export class TraitSelector {
             <div class="trait-card rarity-${c.rarity} ${isEvo ? 'trait-card-evolution' : ''} ${isLocked ? 'trait-card-locked' : ''}" data-id="${c.id}">
               ${lockedBadge}
               ${evoBadge}
+              ${signatureBadge}
               <div class="trait-icon">${c.icon}</div>
-              <div class="trait-rarity-tag">${c.rarity.toUpperCase()}</div>
+              <div class="trait-rarity-tag">${c.tier} · ${c.rarity.toUpperCase()}</div>
               <h3 class="trait-name">${displayName}</h3>
               <p class="trait-desc">${displayDesc}</p>
               <div class="trait-btn-hint">${clickPrompt}</div>
