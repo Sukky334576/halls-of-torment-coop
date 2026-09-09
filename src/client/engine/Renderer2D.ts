@@ -1,4 +1,4 @@
-import { MonsterType } from '../../shared/types';
+import { MonsterType, PropInstance } from '../../shared/types';
 import { STAGES } from '../../shared/stages';
 import { GraphicsSettings } from './GraphicsSettings';
 
@@ -43,6 +43,10 @@ export class Renderer2D {
   private groundDecals: GroundDecal[] = [];
   private readonly WORLD_BOUNDS = 4500;
 
+  // Static collidable stage obstacles (see shared/stages.ts generateStageProps) & their theme tint
+  private stageProps: PropInstance[] = [];
+  private stagePropTint: { base: string; edge: string } = { base: '#2a2f3d', edge: '#0a0c10' };
+
   // Torchlight flicker
   private torchFlicker: number = 1.0;
 
@@ -76,6 +80,14 @@ export class Renderer2D {
 
   public setStage(stageId: number): void {
     this.createGothicFloorPattern(stageId);
+    const theme = STAGES[stageId];
+    if (theme) {
+      this.stagePropTint = { base: theme.mortarColor, edge: theme.crackColor };
+    }
+  }
+
+  public setProps(props: PropInstance[]): void {
+    this.stageProps = props;
   }
 
   private createGothicFloorPattern(stageId: number = 1): void {
@@ -434,6 +446,71 @@ export class Renderer2D {
 
     // 3. Render Gothic Spiked Iron Palisades & Perimeter Braziers
     this.renderBoundaries(ctx, viewLeft, viewTop, viewW, viewH, half);
+
+    // 4. Render static collidable stage props (pillars, spikes, rubble)
+    for (const prop of this.stageProps) {
+      if (prop.x < viewLeft - 60 || prop.x > viewLeft + viewW + 60 || prop.y < viewTop - 60 || prop.y > viewTop + viewH + 60) {
+        continue; // Viewport culling
+      }
+      this.drawStageProp(ctx, prop);
+    }
+  }
+
+  private drawStageProp(ctx: CanvasRenderingContext2D, prop: PropInstance): void {
+    const { base, edge } = this.stagePropTint;
+    ctx.save();
+    ctx.translate(prop.x, prop.y);
+
+    // Contact shadow grounds the prop on the floor
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.beginPath();
+    ctx.ellipse(0, prop.radius * 0.35, prop.radius * 0.9, prop.radius * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (prop.kind === 'PILLAR') {
+      ctx.fillStyle = base;
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(-prop.radius * 0.55, -prop.radius, prop.radius * 1.1, prop.radius * 1.7, 6);
+      ctx.fill();
+      ctx.stroke();
+      // Capital + base bands for a broken-column silhouette
+      ctx.fillStyle = edge;
+      ctx.fillRect(-prop.radius * 0.7, -prop.radius, prop.radius * 1.4, prop.radius * 0.18);
+      ctx.fillRect(-prop.radius * 0.7, prop.radius * 0.5, prop.radius * 1.4, prop.radius * 0.18);
+    } else if (prop.kind === 'SPIKE') {
+      ctx.fillStyle = base;
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(0, -prop.radius * 1.3);
+      ctx.lineTo(prop.radius * 0.75, prop.radius * 0.6);
+      ctx.lineTo(prop.radius * 0.15, prop.radius * 0.4);
+      ctx.lineTo(-prop.radius * 0.3, prop.radius * 0.7);
+      ctx.lineTo(-prop.radius * 0.7, prop.radius * 0.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      // RUBBLE — a small irregular cluster of stone chunks
+      const chunks = [
+        { dx: 0, dy: 0, r: prop.radius * 0.65 },
+        { dx: -prop.radius * 0.5, dy: prop.radius * 0.25, r: prop.radius * 0.4 },
+        { dx: prop.radius * 0.45, dy: prop.radius * 0.3, r: prop.radius * 0.45 }
+      ];
+      ctx.fillStyle = base;
+      ctx.strokeStyle = edge;
+      ctx.lineWidth = 2;
+      for (const c of chunks) {
+        ctx.beginPath();
+        ctx.arc(c.dx, c.dy, c.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
   }
 
   private renderBoundaries(ctx: CanvasRenderingContext2D, vl: number, vt: number, vw: number, vh: number, half: number): void {

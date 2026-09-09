@@ -256,6 +256,15 @@ export interface TraitOption {
   apply: (stats: PlayerStats, skills: PlayerSkills) => void;
 }
 
+/** A static, collidable dungeon obstacle scattered around a stage's arena (see stages.ts generateStageProps). */
+export interface PropInstance {
+  id: number;
+  kind: 'PILLAR' | 'SPIKE' | 'RUBBLE';
+  x: number;
+  y: number;
+  radius: number; // Collision radius — players & monsters are blocked from entering it.
+}
+
 export interface PlayerNetworkData {
   id: string;
   name: string;
@@ -347,6 +356,10 @@ export interface GameStateTick {
   totalKills: number;
   teamGold: number;
   stageId?: number;
+  // Seconds left before the final-boss (wave 30) execute deadline fires — see
+  // HordeDirector.isInDeadlineWarning(). null until the warning window actually starts
+  // (the first BOSS_DEADLINE_GRACE_SEC of the encounter show no countdown at all).
+  bossDeadlineRemaining?: number | null;
 }
 
 export type ClientMessage =
@@ -372,7 +385,7 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: 'JOIN_REJECTED'; reason: string }
   | { type: 'LOBBY_STATE'; players: { id: string; name: string; playerClass: PlayerClass; ready: boolean }[]; isStarted: boolean; stageId?: number }
-  | { type: 'GAME_START'; yourId: string; stageId?: number }
+  | { type: 'GAME_START'; yourId: string; stageId?: number; props?: PropInstance[] }
   | { type: 'TICK'; data: GameStateTick }
   | {
       type: 'LEVEL_UP_CHOICE';
@@ -403,4 +416,4 @@ export type ServerMessage =
     }
   | { type: 'WELL_GEAR_RETRIEVED'; gearName: string; retrievedBy: string }
   | { type: 'GRANT_GOLD'; amount: number; message: string; thaiMessage: string; grantId?: string }
-  | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number };
+  | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number; reason?: 'BOSS_ENRAGE_EXECUTE' };

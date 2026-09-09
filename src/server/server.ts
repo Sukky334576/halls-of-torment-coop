@@ -208,7 +208,7 @@ wss.on('connection', (ws: WebSocket) => {
             currentRoom.reconnectPlayer(client.deviceId);
             client.roomId = currentRoom.id;
             console.log(`🔌 Player ${client.deviceId} (${client.name}) reconnected to Stage ${currentRoom.getStageId()}`);
-            sendToClient(client.id, { type: 'GAME_START', yourId: client.deviceId, stageId: currentRoom.getStageId() });
+            sendToClient(client.id, { type: 'GAME_START', yourId: client.deviceId, stageId: currentRoom.getStageId(), props: currentRoom.getProps() });
             broadcastLobbyState();
             break;
           }
@@ -236,7 +236,7 @@ wss.on('connection', (ws: WebSocket) => {
             console.log(`🚀 Player ${client.deviceId} (${client.name}) dropping into active Stage ${currentRoom.getStageId()}!`);
             currentRoom.addPlayer(client.deviceId, client.name, client.playerClass, client.unlockedSkills, client.treePassives);
             client.roomId = currentRoom.id;
-            sendToClient(client.id, { type: 'GAME_START', yourId: client.deviceId, stageId: currentRoom.getStageId() });
+            sendToClient(client.id, { type: 'GAME_START', yourId: client.deviceId, stageId: currentRoom.getStageId(), props: currentRoom.getProps() });
             broadcastLobbyState();
             break;
           }
