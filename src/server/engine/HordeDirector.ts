@@ -16,6 +16,16 @@ export class HordeDirector {
   public static readonly MAX_WAVES = 30;
   public static readonly WAVE_DURATION_SEC = 40; // 40s per wave = 1200s (20 mins) total run
 
+  // Hard deadline for the final-wave boss encounter (see isDeadlineExpired()). Without this,
+  // a final boss the party can't kill (and nobody surrenders) leaves the room's tick loop
+  // running forever — no other end condition in GameRoom.tick() covers this case. Deliberately
+  // a flat timeout + guaranteed execute rather than gradual enrage/attrition: smallest test
+  // surface, easiest to reason about/debug, and it guarantees the match actually ends.
+  public static readonly BOSS_DEADLINE_GRACE_SEC = 90; // no countdown shown yet — let players get their bearings
+  public static readonly BOSS_DEADLINE_WARNING_SEC = 210; // countdown-visible window after grace
+  public static readonly BOSS_DEADLINE_TOTAL_SEC =
+    HordeDirector.BOSS_DEADLINE_GRACE_SEC + HordeDirector.BOSS_DEADLINE_WARNING_SEC; // 300s (5 min) total
+
   private stageId: number = 1;
   private stageHpMult: number = 1.0;
   private stageDmgMult: number = 1.0;
@@ -29,6 +39,9 @@ export class HordeDirector {
   private bossSpawnedForWave: boolean = false;
   private bossAlive: boolean = false;
   private pendingTomeDrop: boolean = false;
+  // Seconds spent in the FINAL wave's boss encounter specifically (not earlier boss waves at
+  // 5/10/15/20/25 — those can't soft-lock the room since a normal wave always follows them).
+  private bossEncounterTimer: number = 0;
 
   constructor(stageId: number = 1) {
     this.setStage(stageId);
@@ -59,6 +72,17 @@ export class HordeDirector {
     const isBossBlocking = this.isBossWave() && this.bossAlive;
     if (isBossBlocking && this.waveTimer < 0) {
       this.waveTimer = 0; // Hold at 0 during boss encounter
+    }
+
+    // Final-wave execute deadline: only ticks during the LAST boss encounter (wave 30) —
+    // earlier boss waves (5/10/15/20/25) always resolve into a following normal wave, so they
+    // can't soft-lock the room and must never be affected by this. Resets immediately once
+    // the boss stops blocking (killed, or any other reason), so a defeated-in-time boss never
+    // leaves a stale timer running into the next state.
+    if (isBossBlocking && this.currentWave === HordeDirector.MAX_WAVES) {
+      this.bossEncounterTimer += dt;
+    } else {
+      this.bossEncounterTimer = 0;
     }
 
     if (!isBossBlocking && this.waveTimer <= 0 && this.currentWave < HordeDirector.MAX_WAVES) {
@@ -258,5 +282,20 @@ export class HordeDirector {
 
   public getElapsedTime(): number {
     return this.elapsedTime;
+  }
+
+  /** True once the grace period has elapsed and the countdown should become visible to players. */
+  public isInDeadlineWarning(): boolean {
+    return this.bossEncounterTimer > HordeDirector.BOSS_DEADLINE_GRACE_SEC;
+  }
+
+  /** Seconds left before isDeadlineExpired() fires — only meaningful once isInDeadlineWarning() is true. */
+  public deadlineSecondsRemaining(): number {
+    return Math.max(0, HordeDirector.BOSS_DEADLINE_TOTAL_SEC - this.bossEncounterTimer);
+  }
+
+  /** True once the final-boss encounter has run past the hard deadline — GameRoom must force-end the match. */
+  public isDeadlineExpired(): boolean {
+    return this.bossEncounterTimer >= HordeDirector.BOSS_DEADLINE_TOTAL_SEC;
   }
 }

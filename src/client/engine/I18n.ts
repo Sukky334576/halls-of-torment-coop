@@ -82,6 +82,11 @@ const TRANSLATIONS: TranslationKeys = {
   'hud.wave_boss': { th: 'เวฟ {wave}/{maxWaves} [เผชิญหน้าบอส]', en: 'WAVE {wave}/{maxWaves} [BOSS BATTLE]' },
   'hud.defeat_boss': { th: '⚔️ กำจัดบอส! ⚔️', en: '⚔️ DEFEAT BOSS ⚔️' },
   'hud.boss_encounter': { th: '⚠️ บอสสุดแกร่งปรากฏตัว! ⚠️', en: '⚠️ DREADFUL BOSS ENCOUNTER ⚠️' },
+  'hud.deadline_warning': { th: '💀 พลังมืดกำลังกลืนกินสนามรบ! รีบจบศึกก่อนหมดเวลา! 💀', en: '💀 DARKNESS IS CONSUMING THE BATTLEFIELD — END THIS FIGHT! 💀' },
+  'gameover.boss_enrage_execute': {
+    th: 'บอสทรงพลังเกินกว่าจะสู้ต่อไหว ความมืดกลืนกินปาร์ตี้ของคุณ',
+    en: 'The boss proved too powerful — the darkness consumed your party.'
+  },
   'hud.boss_slain': {
     th: '🏆 {boss} ถูกกำจัดแล้ว! เวฟต่อไปใน {sec} วิ... 🏆',
     en: '🏆 {boss} SLAIN! NEXT WAVE IN {sec}S... 🏆'

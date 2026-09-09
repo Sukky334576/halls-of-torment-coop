@@ -398,6 +398,7 @@ class GameApp {
             if (msg.stageId) {
               this.renderer.setStage(msg.stageId);
             }
+            this.renderer.setProps(msg.props || []);
             break;
           }
 
@@ -472,7 +473,7 @@ class GameApp {
               msg.victory ? (msg.clearedStageId || 1) : undefined
             );
             this.lobby.refreshCoins();
-            this.hud.showGameOver(msg.victory, msg.survivalTime, msg.totalKills, totalGoldEarned);
+            this.hud.showGameOver(msg.victory, msg.survivalTime, msg.totalKills, totalGoldEarned, msg.reason);
             break;
           }
         }
@@ -596,7 +597,8 @@ class GameApp {
       data.monsters,
       data.pickups,
       me.dashCooldownRemaining || 0,
-      me.activeBuff
+      me.activeBuff,
+      data.bossDeadlineRemaining ?? null
     );
 
     // 6. Update ESC Codex Menu if open

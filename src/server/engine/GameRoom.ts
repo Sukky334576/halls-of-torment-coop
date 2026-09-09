@@ -11,7 +11,8 @@ import {
   DamageNumberData,
   ServerMessage,
   ClientMessage,
-  TraitOption
+  TraitOption,
+  PropInstance
 } from '../../shared/types';
 import { GAME_CONSTANTS } from '../../shared/constants';
 import { TRAIT_POOL, WEAPON_EVOLUTIONS, getPowerTier, getTierWeight } from '../../shared/classes';
@@ -19,7 +20,12 @@ import { ServerPlayer } from '../entities/ServerPlayer';
 import { ServerMonster, ElementStatus } from '../entities/ServerMonster';
 import { SpatialGrid } from './SpatialGrid';
 import { HordeDirector } from './HordeDirector';
-import { STAGES } from '../../shared/stages';
+import { STAGES, generateStageProps } from '../../shared/stages';
+
+// Comfortably larger than maxHp is reachable by any build — used only by the final-boss
+// execute deadline (see HordeDirector.isDeadlineExpired) to guarantee death via
+// ServerPlayer.applyTrueDamage regardless of how much HP/defense a build has stacked.
+const EXECUTE_DAMAGE_AMOUNT = 999_999;
 
 interface Projectile {
   id: number;
@@ -62,6 +68,7 @@ export class GameRoom {
   private monsterGrid: SpatialGrid<ServerMonster> = new SpatialGrid<ServerMonster>(GAME_CONSTANTS.SPATIAL_CELL_SIZE);
   private hordeDirector: HordeDirector = new HordeDirector();
   private stageId: number = 1;
+  private props: PropInstance[] = [];
 
   private projectiles: Projectile[] = [];
   private pickups: Pickup[] = [];
@@ -144,6 +151,10 @@ export class GameRoom {
     return this.stageId;
   }
 
+  public getProps(): PropInstance[] {
+    return this.props;
+  }
+
   public removePlayer(id: string): void {
     const timer = this.disconnectTimers.get(id);
     if (timer) {
@@ -206,8 +217,9 @@ export class GameRoom {
     this.hordeDirector.setStage(stageId);
     this.isStarted = true;
     this.teamGold = 35000; // Initial 35,000 gold gift for current players!
+    this.props = generateStageProps(stageId);
     for (const [id] of this.players) {
-      this.sendCallback(id, { type: 'GAME_START', yourId: id, stageId });
+      this.sendCallback(id, { type: 'GAME_START', yourId: id, stageId, props: this.props });
     }
 
     this.intervalId = setInterval(() => {
@@ -269,6 +281,15 @@ export class GameRoom {
     // immediately instead of dropping them into combat mid-catch-up.
     if (player.catchUpChoicesRemaining > 0) {
       player.catchUpChoicesRemaining--;
+      this.startLevelUpChoice(player);
+      return;
+    }
+
+    // A level-up that arrived while this card was on screen (see startLevelUpChoice) — show
+    // it now instead of unpausing. Checked separately from catchUpChoicesRemaining above so
+    // neither queue can silently swallow the other if both happen to be pending at once.
+    if (player.pendingLevelUpChoices > 0) {
+      player.pendingLevelUpChoices--;
       this.startLevelUpChoice(player);
       return;
     }
@@ -340,6 +361,26 @@ export class GameRoom {
     const mapLimit = (GAME_CONSTANTS.MAP_SIZE / 2) - 80;
     monster.x = Math.max(-mapLimit, Math.min(mapLimit, monster.x));
     monster.y = Math.max(-mapLimit, Math.min(mapLimit, monster.y));
+    this.resolvePropCollision(monster, monster.radius);
+  }
+
+  /** Pushes a moving circle entity back out of any prop it's overlapping after a position update. */
+  private resolvePropCollision(entity: { x: number; y: number }, entityRadius: number): void {
+    for (const prop of this.props) {
+      const dx = entity.x - prop.x;
+      const dy = entity.y - prop.y;
+      const minDist = entityRadius + prop.radius;
+      const dist = Math.hypot(dx, dy);
+      if (dist >= minDist) continue;
+      if (dist > 0.0001) {
+        const overlap = minDist - dist;
+        entity.x += (dx / dist) * overlap;
+        entity.y += (dy / dist) * overlap;
+      } else {
+        // Degenerate exact-overlap case: shove along a fixed axis rather than divide by zero.
+        entity.x += minDist;
+      }
+    }
   }
 
   public handleSurrender(playerId: string): void {
@@ -353,10 +394,12 @@ export class GameRoom {
       this.isOver = true;
       this.broadcastGameOver(false);
     } else {
-      // In co-op, send GAME_OVER directly to surrendering player
+      // In co-op, send GAME_OVER directly to surrendering player, then actually remove them
+      // from the room. Leaving them in `players` as merely dead meant the client's "Return to
+      // Hub" button (a plain page reload) would reconnect straight back into this same
+      // still-active room via the JOIN_LOBBY resume check, trapping the player who just left.
       this.sendGameOverTo(player, false);
-      player.isDead = true;
-      player.stats.hp = 0;
+      this.removePlayer(playerId);
 
       let aliveCount = 0;
       for (const p of this.players.values()) {
@@ -395,6 +438,7 @@ export class GameRoom {
         aliveCount++;
         alivePlayers.push(player);
         player.update(dt);
+        this.resolvePropCollision(player, player.radius);
 
         // Process Player Attack
         if (player.canAttack()) {
@@ -433,6 +477,22 @@ export class GameRoom {
     if (aliveCount === 0 && this.players.size > 0) {
       this.isOver = true;
       this.broadcastGameOver(false);
+      return;
+    }
+
+    // Final-boss execute deadline: the party has been fighting the wave-30 boss for
+    // BOSS_DEADLINE_TOTAL_SEC straight with no kill and nobody surrendered — force the match
+    // to end rather than let the tick loop run forever (see HordeDirector.isDeadlineExpired
+    // for why this exists). True-damage everyone still standing so they die through the same
+    // isDead path/animation as a normal death, then end the match unconditionally regardless
+    // of whether every execute actually lands (e.g. a ghosted level-up-choosing player).
+    if (this.hordeDirector.isDeadlineExpired() && !this.isOver) {
+      for (const player of this.players.values()) {
+        if (player.isDead || player.isDisconnected) continue;
+        player.applyTrueDamage(EXECUTE_DAMAGE_AMOUNT);
+      }
+      this.isOver = true;
+      this.broadcastGameOver(false, this.stageId, 'BOSS_ENRAGE_EXECUTE');
       return;
     }
 
@@ -499,6 +559,7 @@ export class GameRoom {
       const shouldShoot = monster.update(dt, targetX, targetY);
       monster.x = Math.max(-mapLimit, Math.min(mapLimit, monster.x));
       monster.y = Math.max(-mapLimit, Math.min(mapLimit, monster.y));
+      this.resolvePropCollision(monster, monster.radius);
       this.monsterGrid.insert(monster);
 
       if (shouldShoot) {
@@ -2369,7 +2430,18 @@ export class GameRoom {
   // Solo: pause like before (nobody else is inconvenienced by it).
   // Co-op: keep the world running and just ghost the leveling player (see takeDamage()),
   // so the rest of the team doesn't have to stop and wait on one person's card choice.
+  //
+  // If a card is ALREADY on screen (another EXP source pushed them over a level threshold
+  // before they responded to the first one), queue this one in pendingLevelUpChoices instead
+  // of calling triggerLevelUpChoices() again — that would silently replace the LEVEL_UP_CHOICE
+  // the client is currently showing, dropping the first pick without the player ever seeing
+  // it. handleSelectTrait() pops this queue (same pattern as catchUpChoicesRemaining) once
+  // the current pick is resolved.
   private startLevelUpChoice(player: ServerPlayer): void {
+    if (player.isChoosingTrait) {
+      player.pendingLevelUpChoices++;
+      return;
+    }
     player.isChoosingTrait = true;
     if (this.players.size <= 1) {
       this.isPaused = true;
@@ -2771,6 +2843,9 @@ export class GameRoom {
       isBossWave: this.hordeDirector.isBossWave(),
       bossName: this.hordeDirector.getBossName(),
       bossAlive: this.hordeDirector.isBossAlive(),
+      bossDeadlineRemaining: this.hordeDirector.isInDeadlineWarning()
+        ? Math.ceil(this.hordeDirector.deadlineSecondsRemaining())
+        : null,
       players: Array.from(this.players.values()).map((p) => p.toNetworkData()),
       monsters: Array.from(this.monsters.values()).map((m) => ({
         id: m.id,
@@ -2834,7 +2909,7 @@ export class GameRoom {
 
   // Gold is personal now, so GAME_OVER can't be a single shared broadcast payload —
   // each player needs their own `personalGold` baked into their copy of the message.
-  private sendGameOverTo(player: ServerPlayer, victory: boolean, clearedStageId?: number): void {
+  private sendGameOverTo(player: ServerPlayer, victory: boolean, clearedStageId?: number, reason?: 'BOSS_ENRAGE_EXECUTE'): void {
     this.sendCallback(player.id, {
       type: 'GAME_OVER',
       victory,
@@ -2843,13 +2918,14 @@ export class GameRoom {
       teamGold: this.teamGold,
       personalGold: player.gold,
       playerCount: this.players.size,
-      clearedStageId
+      clearedStageId,
+      reason
     });
   }
 
-  private broadcastGameOver(victory: boolean, clearedStageId?: number): void {
+  private broadcastGameOver(victory: boolean, clearedStageId?: number, reason?: 'BOSS_ENRAGE_EXECUTE'): void {
     for (const player of this.players.values()) {
-      this.sendGameOverTo(player, victory, clearedStageId);
+      this.sendGameOverTo(player, victory, clearedStageId, reason);
     }
   }
 }

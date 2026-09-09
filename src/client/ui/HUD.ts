@@ -68,6 +68,15 @@ export class HUD {
         <div id="hud-boss-name" class="boss-banner-name">ELITE GOLEM OF TORMENT</div>
       </div>
 
+      <!-- Boss Execute Deadline Countdown (only visible once the grace period has passed) -->
+      <div id="hud-deadline-banner" class="hud-deadline-banner" style="display: none;">
+        <div class="deadline-banner-label">${I18n.t('hud.deadline_warning')}</div>
+        <div id="hud-deadline-timer" class="deadline-banner-timer">5:00</div>
+      </div>
+
+      <!-- Full-screen red vignette that intensifies as the execute deadline approaches -->
+      <div id="hud-deadline-vignette" class="hud-deadline-vignette" style="opacity: 0;"></div>
+
       <!-- Top Right: Volume Settings, Language Panel & ESC Menu -->
       <div class="hud-volume-panel">
         <button id="btn-hud-esc" class="btn-hud-esc" title="พักรบ & ดูข้อมูล (ESC) / Pause & Codex">⚙️ ESC</button>
@@ -279,8 +288,11 @@ export class HUD {
     monsters: MonsterNetworkData[] = [],
     pickups: PickupNetworkData[] = [],
     dashCooldownRemaining: number = 0,
-    activeBuff?: { type: string; durationRemaining: number }
+    activeBuff?: { type: string; durationRemaining: number },
+    bossDeadlineRemaining: number | null = null
   ): void {
+    this.updateDeadlineWarning(bossDeadlineRemaining);
+
     // 0. Update Wave & Boss Banner
     const waveEl = document.getElementById('hud-wave');
     if (waveEl) {
@@ -461,6 +473,42 @@ export class HUD {
     this.miniMap.update(players, localPlayerId, monsters, pickups, bossAlive);
   }
 
+  /**
+   * Boss-execute deadline countdown + escalating red vignette (see HordeDirector.
+   * isInDeadlineWarning/deadlineSecondsRemaining and GameRoom.tick()'s execute check).
+   * `remaining` is null for the entire grace period — the countdown only appears once the
+   * server actually starts counting down, matching "players get 90s to get their bearings
+   * with no timer pressure at all" from the design.
+   */
+  private updateDeadlineWarning(remaining: number | null): void {
+    const banner = document.getElementById('hud-deadline-banner');
+    const timerEl = document.getElementById('hud-deadline-timer');
+    const vignette = document.getElementById('hud-deadline-vignette');
+    if (!banner || !timerEl || !vignette) return;
+
+    if (remaining === null) {
+      this.hideDeadlineWarning();
+      return;
+    }
+
+    banner.style.display = 'flex';
+    const mins = Math.floor(remaining / 60);
+    const secs = Math.floor(remaining % 60).toString().padStart(2, '0');
+    timerEl.textContent = `${mins}:${secs}`;
+
+    // Vignette only appears in the final minute so it doesn't wash out the screen for the
+    // whole (up to 210s) warning window — ramps 0 -> ~0.55 opacity as remaining hits 0.
+    const urgency = Math.max(0, Math.min(1, (60 - remaining) / 60));
+    vignette.style.opacity = (urgency * 0.55).toString();
+  }
+
+  private hideDeadlineWarning(): void {
+    const banner = document.getElementById('hud-deadline-banner');
+    const vignette = document.getElementById('hud-deadline-vignette');
+    if (banner) banner.style.display = 'none';
+    if (vignette) vignette.style.opacity = '0';
+  }
+
   private renderFloatingNumbers(
     camera: { x: number; y: number; zoom: number },
     players?: PlayerNetworkData[],
@@ -589,7 +637,13 @@ export class HUD {
     }
   }
 
-  public showGameOver(victory: boolean, survivalTime: number, totalKills: number, goldEarned: number): void {
+  public showGameOver(
+    victory: boolean,
+    survivalTime: number,
+    totalKills: number,
+    goldEarned: number,
+    reason?: 'BOSS_ENRAGE_EXECUTE'
+  ): void {
     const modal = document.getElementById('game-over-modal');
     if (!modal) return;
 
@@ -611,8 +665,13 @@ export class HUD {
         title.textContent = I18n.t('gameover.defeat_title');
         title.style.color = '#ef4444';
       }
-      if (sub) sub.textContent = I18n.t('gameover.defeat_sub');
+      // The hard boss-execute deadline gets its own message so it doesn't read as a normal
+      // combat wipe — see HordeDirector.isDeadlineExpired / GameRoom.tick().
+      if (sub) sub.textContent = reason === 'BOSS_ENRAGE_EXECUTE' ? I18n.t('gameover.boss_enrage_execute') : I18n.t('gameover.defeat_sub');
     }
+
+    // Reset the deadline countdown UI so it doesn't linger into the next run's HUD.
+    this.hideDeadlineWarning();
 
     const mins = Math.floor(survivalTime / 60).toString().padStart(2, '0');
     const secs = Math.floor(survivalTime % 60).toString().padStart(2, '0');
