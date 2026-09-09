@@ -1,5 +1,5 @@
 import { PlayerClass } from '../../shared/types';
-import { CLASS_SKILL_TREES, SkillTreeNode } from '../../shared/skillTreeData';
+import { CLASS_SKILL_TREES, SkillTreeNode, ClassSkillTree, StatModType } from '../../shared/skillTreeData';
 import { GearSlot, GearItem, GEAR_CATALOG, getGearItem } from '../../shared/gearData';
 import { TrialQuest, TRIAL_QUESTS, getTrialQuest } from '../../shared/trialQuests';
 
@@ -74,7 +74,6 @@ export interface MetaSaveData {
   coins: number;
   unlockedSkills: string[];
   allocatedNodes: string[];
-  passiveTiers: Record<string, number>;
   highestStageUnlocked?: number;
   unlockedHeroes: PlayerClass[];
 
@@ -90,6 +89,58 @@ export interface MetaSaveData {
     banishes: number;
     locks: number;
   };
+}
+
+/**
+ * Skill tree nodes store small "points" per stat (e.g. `moveSpeed: 0.5` on a minor node).
+ * These are the fixed multipliers that convert a node's raw stat point into the percentage
+ * bonus actually applied to the matching PlayerStats field — chosen once during tree
+ * balancing, kept here as named constants instead of bare numbers scattered across
+ * getPassiveTiersForClass(). maxHp, defense, expMultiplier, and tierLuck pass through
+ * unscaled (1 point = 1 unit) and aren't listed since there's nothing to name.
+ */
+const STAT_SCALE_FACTORS = {
+  moveSpeed: 6, // e.g. a 0.5-point node grants +3% move speed (0.5 * 6)
+  pickupRadius: 25, // e.g. a 0.5-point node grants +12.5% pickup radius (0.5 * 25)
+  damageBonus: 8 // e.g. a 0.5-point node grants +4% damage bonus (0.5 * 8)
+} as const;
+
+/**
+ * A Vampire-Survivors-style build stacks far more items/nodes than a PoE build ever stacks
+ * keystones, so an uncapped product of 'more' modifiers on one stat would compound out of
+ * control fast (four +20% 'more' mods already multiply to 1.2^4 ≈ 2.07x). This caps how many
+ * 'more' modifiers on the SAME stat count toward the product — extra ones beyond this are
+ * ignored (not refunded, not blocked from allocating, just inert) with a console warning,
+ * rather than silently or unpredictably breaking build math.
+ */
+export const MAX_MORE_MODIFIERS_PER_STAT = 4;
+
+/**
+ * Combines a stat's 'increased' and 'more' contributions PoE-style: every 'increased'
+ * value pools additively into one bucket and is applied once, then multiplied by each
+ * 'more' modifier as its own separate multiplicative layer — final = base * (1 +
+ * sum(increased)/100) * product(more). Returns a single equivalent percentage so the
+ * existing `base *= (1 + pct/100)` call sites in ServerPlayer.ts don't need to change.
+ *
+ * When there are no 'more' modifiers this returns `increasedSum` completely unchanged
+ * (no arithmetic round-trip at all) — every node today is 'increased' by default, so this
+ * is what keeps every existing build's numbers bit-for-bit identical to before this system
+ * existed, not just numerically close.
+ */
+export function combineIncreasedAndMore(increasedSum: number, moreMultipliers: number[]): number {
+  if (moreMultipliers.length === 0) return increasedSum;
+
+  let capped = moreMultipliers;
+  if (moreMultipliers.length > MAX_MORE_MODIFIERS_PER_STAT) {
+    console.warn(
+      `[SkillTree] ${moreMultipliers.length} 'more' modifiers stacked on one stat — ` +
+      `capping at ${MAX_MORE_MODIFIERS_PER_STAT} to prevent power creep. Extras are ignored.`
+    );
+    capped = moreMultipliers.slice(0, MAX_MORE_MODIFIERS_PER_STAT);
+  }
+
+  const moreProduct = capped.reduce((product, multiplier) => product * multiplier, 1);
+  return ((1 + increasedSum / 100) * moreProduct - 1) * 100;
 }
 
 export const ALL_PLAYABLE_HEROES: PlayerClass[] = [
@@ -114,7 +165,7 @@ export class MetaProgressionManager {
     this.data.unlockedHeroes = [...ALL_PLAYABLE_HEROES];
     this.save();
     this.checkAndGrantAirdrop();
-    this.recomputePassivesAndSignatures();
+    this.recomputeSignatures();
   }
 
   private checkAndGrantAirdrop(): void {
@@ -182,7 +233,6 @@ export class MetaProgressionManager {
           coins: typeof parsed.coins === 'number' ? parsed.coins : 25,
           unlockedSkills: Array.isArray(parsed.unlockedSkills) ? parsed.unlockedSkills : [],
           allocatedNodes,
-          passiveTiers: typeof parsed.passiveTiers === 'object' && parsed.passiveTiers ? parsed.passiveTiers : {},
           highestStageUnlocked: typeof parsed.highestStageUnlocked === 'number' ? Math.max(1, Math.min(3, parsed.highestStageUnlocked)) : 1,
           unlockedHeroes,
           vaultInventory,
@@ -201,7 +251,6 @@ export class MetaProgressionManager {
       coins: 25,
       unlockedSkills: [],
       allocatedNodes: ['sw_root', 'so_root', 'ar_root', 'cl_root', 'uni_root'],
-      passiveTiers: {},
       highestStageUnlocked: 1,
       unlockedHeroes: [...ALL_PLAYABLE_HEROES],
       vaultInventory: ['helm_iron_visage', 'boots_leather_treads', 'ring_copper_band'],
@@ -295,32 +344,121 @@ export class MetaProgressionManager {
     }
 
     // Recompute total passive bonuses from all allocated nodes
-    this.recomputePassivesAndSignatures();
+    this.recomputeSignatures();
     this.save();
     return true;
   }
 
-  public recomputePassivesAndSignatures(): void {
-    const statsTotal: Record<string, number> = {};
+  private findNodeInAnyTree(nodeId: string): SkillTreeNode | undefined {
+    for (const tree of Object.values(CLASS_SKILL_TREES)) {
+      if (tree.nodes[nodeId]) return tree.nodes[nodeId];
+    }
+    return undefined;
+  }
+
+  /** BFS from a tree's root through a given set of allocated node ids, following `connections`. */
+  private reachableFromRoot(tree: ClassSkillTree, allocatedIds: Set<string>): Set<string> {
+    const reachable = new Set<string>([tree.rootId]);
+    const queue = [tree.rootId];
+    while (queue.length > 0) {
+      const currentId = queue.shift()!;
+      const current = tree.nodes[currentId];
+      if (!current) continue;
+      for (const neighborId of current.connections) {
+        if (allocatedIds.has(neighborId) && !reachable.has(neighborId)) {
+          reachable.add(neighborId);
+          queue.push(neighborId);
+        }
+      }
+    }
+    return reachable;
+  }
+
+  /**
+   * A node can be freely un-invested as long as removing it doesn't cut off another
+   * currently-allocated node's path back to the tree's root — mirrors how a passive-skill
+   * web (e.g. Path of Exile's) lets you respec freely from the outside in, but blocks
+   * yanking out a node that's propping up picks further down the line.
+   *
+   * Compares reachability BEFORE vs. AFTER removing the node, rather than requiring full
+   * reachability of the whole current allocation: older save data can carry allocations
+   * from a since-rebalanced tree shape that were never strictly connected node-by-node
+   * under today's `connections` graph, and those pre-existing gaps shouldn't block a player
+   * from un-investing an unrelated, cleanly-connected node elsewhere in the same tree.
+   */
+  public canUnallocateNode(nodeId: string): { can: boolean; reason?: string } {
+    if (!this.isNodeAllocated(nodeId)) {
+      return { can: false, reason: 'Not allocated' };
+    }
+    const node = this.findNodeInAnyTree(nodeId);
+    if (!node) return { can: false, reason: 'Unknown node' };
+    if (node.type === 'root') return { can: false, reason: 'Cannot un-invest the origin root' };
+
+    const tree = CLASS_SKILL_TREES[node.classType];
+    if (!tree) return { can: false, reason: 'Unknown tree' };
+
+    const allocatedInTree = new Set(this.data.allocatedNodes.filter((id) => tree.nodes[id]));
+    const reachableBefore = this.reachableFromRoot(tree, allocatedInTree);
+
+    const allocatedWithoutNode = new Set(allocatedInTree);
+    allocatedWithoutNode.delete(nodeId);
+    const reachableAfter = this.reachableFromRoot(tree, allocatedWithoutNode);
+
+    const orphaned = [...reachableBefore].filter((id) => id !== nodeId && !reachableAfter.has(id));
+    if (orphaned.length > 0) {
+      return {
+        can: false,
+        reason: `${orphaned.length} skill${orphaned.length > 1 ? 's' : ''} further down this path depend on it — un-invest those first`
+      };
+    }
+    return { can: true };
+  }
+
+  /** 70% of a node's gold cost comes back on respec — a real choice, not a free do-over. */
+  public static readonly RESPEC_REFUND_RATE = 0.7;
+
+  public getRespecRefundAmount(cost: number): number {
+    // Math.round rather than Math.floor: floating-point multiplication (e.g. 360 * 0.7 ===
+    // 251.99999999999997) would otherwise silently shortchange the player by 1 coin.
+    return Math.round(cost * MetaProgressionManager.RESPEC_REFUND_RATE);
+  }
+
+  /** Refunds 70% of the node's gold cost and frees the point. See canUnallocateNode() for the rule. */
+  public unallocateNode(nodeId: string): boolean {
+    const check = this.canUnallocateNode(nodeId);
+    if (!check.can) return false;
+    const node = this.findNodeInAnyTree(nodeId);
+    if (!node) return false;
+
+    this.data.coins += this.getRespecRefundAmount(node.cost);
+    this.data.allocatedNodes = this.data.allocatedNodes.filter((id) => id !== nodeId);
+
+    // Signature skills earned via a node stay unlocked in the in-game level-up pool even
+    // after a respec — matches how unlockedSkills is treated everywhere else as a permanent
+    // "you've proven this build once" ledger, not a live mirror of currently-allocated nodes.
+    this.recomputeSignatures();
+    this.save();
+    return true;
+  }
+
+  /**
+   * Scans every allocated node across all trees and records which signature abilities
+   * (for the in-game level-up blessing pool) they've unlocked. Stat totals are NOT computed
+   * here — that's getPassiveTiersForClass()'s job, computed fresh per-class on demand rather
+   * than cached on this.data, since a stale cached copy was never actually read by anything.
+   */
+  public recomputeSignatures(): void {
     const signatures: Set<string> = new Set(this.data.unlockedSkills);
 
     for (const tree of Object.values(CLASS_SKILL_TREES)) {
       for (const node of Object.values(tree.nodes)) {
-        if (this.data.allocatedNodes.includes(node.id)) {
-          if (node.signatureSkillId) {
-            signatures.add(node.signatureSkillId);
-          }
-          if (node.stats) {
-            for (const [key, val] of Object.entries(node.stats)) {
-              statsTotal[key] = (statsTotal[key] || 0) + (val || 0);
-            }
-          }
+        if (this.data.allocatedNodes.includes(node.id) && node.signatureSkillId) {
+          signatures.add(node.signatureSkillId);
         }
       }
     }
 
     this.data.unlockedSkills = Array.from(signatures);
-    this.data.passiveTiers = statsTotal;
   }
 
   public getUnlockedSkillIds(): string[] {
@@ -329,10 +467,6 @@ export class MetaProgressionManager {
 
   public getAllocatedNodeIds(): string[] {
     return [...this.data.allocatedNodes];
-  }
-
-  public getPassiveTiers(): Record<string, number> {
-    return { ...this.data.passiveTiers };
   }
 
   // ==========================================
@@ -407,59 +541,92 @@ export class MetaProgressionManager {
     return totals;
   }
 
+  /**
+   * Combined tree + gear stat contributions for a class, keyed by the SAME field names as
+   * PlayerStats (types.ts) so ServerPlayer.ts can apply each one without a name-translation
+   * step. Values are still deltas/contributions to add or scale into the base stat, not
+   * finished PlayerStats values — see STAT_SCALE_FACTORS for the conversion each one needs.
+   * extraRerolls/extraBanishes/extraLocks ride along on the same object for historical
+   * reasons but aren't PlayerStats fields; ServerPlayer.ts reads them separately.
+   *
+   * moveSpeed/pickupRadius/damageBonus/expMultiplier go through the increased/more modifier
+   * system (see combineIncreasedAndMore) since they're percentage bonuses to an underlying
+   * multiplier. maxHp/defense/tierLuck stay plain flat sums regardless of a node's modType —
+   * they're absolute point values in this game (not a percentage of a base), so "multiply
+   * this flat +10 HP by another modifier" has no well-defined meaning the way it does for a
+   * percentage stat; a node putting 'more' on one of these three is simply treated as flat.
+   */
   public getPassiveTiersForClass(playerClass: PlayerClass): Record<string, number> {
     const statsTotal: Record<string, number> = {
-      flatMaxHp: 0,
-      flatDefense: 0,
-      flatMoveSpeedPct: 0,
-      flatPickupRadiusPct: 0,
-      flatDamageBonusPct: 0,
-      flatExpMultiplierPct: 0,
-      flatCritChancePct: 0,
-      flatAttackSpeedPct: 0,
-      flatTierLuckPct: 0
+      maxHp: 0,
+      defense: 0,
+      moveSpeed: 0,
+      pickupRadius: 0,
+      damageBonus: 0,
+      expMultiplier: 0,
+      critChance: 0,
+      attackSpeed: 0,
+      tierLuck: 0
+    };
+
+    // Per-stat buckets for the increased/more combination — populated across BOTH the
+    // class tree and the universal tree before being combined once at the end, so a
+    // 'more' modifier in one tree still stacks correctly against 'increased' nodes in
+    // the other (they're one shared pool per stat, not per-tree).
+    type PctBucket = { increasedSum: number; moreMultipliers: number[] };
+    const newBucket = (): PctBucket => ({ increasedSum: 0, moreMultipliers: [] });
+    const pct = {
+      moveSpeed: newBucket(),
+      pickupRadius: newBucket(),
+      damageBonus: newBucket(),
+      expMultiplier: newBucket()
+    };
+    const addPct = (bucket: PctBucket, rawPoints: number, scale: number, modType: StatModType) => {
+      const amount = rawPoints * scale;
+      if (modType === 'more') bucket.moreMultipliers.push(1 + amount / 100);
+      else bucket.increasedSum += amount;
+    };
+
+    const addTreeNodes = (tree: ClassSkillTree | undefined) => {
+      if (!tree) return;
+      for (const node of Object.values(tree.nodes)) {
+        if (!this.data.allocatedNodes.includes(node.id)) continue;
+        if (node.stats?.maxHp) statsTotal.maxHp += node.stats.maxHp;
+        if (node.stats?.defense) statsTotal.defense += node.stats.defense;
+        if (node.stats?.tierLuck) statsTotal.tierLuck += node.stats.tierLuck;
+
+        const modType: StatModType = node.modType ?? 'increased';
+        if (node.stats?.moveSpeed) addPct(pct.moveSpeed, node.stats.moveSpeed, STAT_SCALE_FACTORS.moveSpeed, modType);
+        if (node.stats?.pickupRadius) addPct(pct.pickupRadius, node.stats.pickupRadius, STAT_SCALE_FACTORS.pickupRadius, modType);
+        if (node.stats?.damageBonus) addPct(pct.damageBonus, node.stats.damageBonus, STAT_SCALE_FACTORS.damageBonus, modType);
+        if (node.stats?.expMultiplier) addPct(pct.expMultiplier, node.stats.expMultiplier, 1, modType);
+      }
     };
 
     // 1. Class-Specific Tree Passives
-    const tree = CLASS_SKILL_TREES[playerClass];
-    if (tree) {
-      for (const node of Object.values(tree.nodes)) {
-        if (this.data.allocatedNodes.includes(node.id)) {
-          if (node.stats?.maxHp) statsTotal.flatMaxHp += node.stats.maxHp;
-          if (node.stats?.defense) statsTotal.flatDefense += node.stats.defense;
-          if (node.stats?.moveSpeed) statsTotal.flatMoveSpeedPct += node.stats.moveSpeed * 6;
-          if (node.stats?.pickupRadius) statsTotal.flatPickupRadiusPct += node.stats.pickupRadius * 25;
-          if (node.stats?.damageBonus) statsTotal.flatDamageBonusPct += node.stats.damageBonus * 8;
-          if (node.stats?.tierLuck) statsTotal.flatTierLuckPct += node.stats.tierLuck;
-        }
-      }
-    }
+    addTreeNodes(CLASS_SKILL_TREES[playerClass]);
 
     // 2. Universal Central Tree Passives (Shared across all heroes!)
-    const uniTree = CLASS_SKILL_TREES['universal'];
-    if (uniTree) {
-      for (const node of Object.values(uniTree.nodes)) {
-        if (this.data.allocatedNodes.includes(node.id)) {
-          if (node.stats?.expMultiplier) statsTotal.flatExpMultiplierPct += node.stats.expMultiplier;
-          if (node.stats?.maxHp) statsTotal.flatMaxHp += node.stats.maxHp;
-          if (node.stats?.defense) statsTotal.flatDefense += node.stats.defense;
-          if (node.stats?.moveSpeed) statsTotal.flatMoveSpeedPct += node.stats.moveSpeed * 6;
-          if (node.stats?.pickupRadius) statsTotal.flatPickupRadiusPct += node.stats.pickupRadius * 25;
-          if (node.stats?.damageBonus) statsTotal.flatDamageBonusPct += node.stats.damageBonus * 8;
-          if (node.stats?.tierLuck) statsTotal.flatTierLuckPct += node.stats.tierLuck;
-        }
-      }
-    }
+    addTreeNodes(CLASS_SKILL_TREES['universal']);
 
-    // 3. Add Equipped Gear Vault Stats!
+    statsTotal.moveSpeed = combineIncreasedAndMore(pct.moveSpeed.increasedSum, pct.moveSpeed.moreMultipliers);
+    statsTotal.pickupRadius = combineIncreasedAndMore(pct.pickupRadius.increasedSum, pct.pickupRadius.moreMultipliers);
+    statsTotal.damageBonus = combineIncreasedAndMore(pct.damageBonus.increasedSum, pct.damageBonus.moreMultipliers);
+    statsTotal.expMultiplier = combineIncreasedAndMore(pct.expMultiplier.increasedSum, pct.expMultiplier.moreMultipliers);
+
+    // 3. Add Equipped Gear Vault Stats! (getEquippedStatsTotal keeps its own flatXxx naming —
+    // that's GearVaultUI's display contract, unrelated to this function's schema fix — so map
+    // its fields into the plain names here rather than changing that function too. Gear isn't
+    // part of the increased/more system — it folds in afterward as a plain additive bonus on
+    // top of the tree's already-combined percentage, same as before this system existed.)
     const gearStats = this.getEquippedStatsTotal();
-    statsTotal.flatMaxHp += gearStats.flatMaxHp;
-    statsTotal.flatDefense += gearStats.flatDefense;
-    statsTotal.flatMoveSpeedPct += gearStats.flatMoveSpeedPct;
-    statsTotal.flatPickupRadiusPct += gearStats.flatPickupRadiusPct;
-    statsTotal.flatDamageBonusPct += gearStats.flatDamageBonusPct;
-    statsTotal.flatCritChancePct += gearStats.flatCritChancePct;
-    statsTotal.flatAttackSpeedPct += gearStats.flatAttackSpeedPct;
+    statsTotal.maxHp += gearStats.flatMaxHp;
+    statsTotal.defense += gearStats.flatDefense;
+    statsTotal.moveSpeed += gearStats.flatMoveSpeedPct;
+    statsTotal.pickupRadius += gearStats.flatPickupRadiusPct;
+    statsTotal.damageBonus += gearStats.flatDamageBonusPct;
+    statsTotal.critChance += gearStats.flatCritChancePct;
+    statsTotal.attackSpeed += gearStats.flatAttackSpeedPct;
 
     // 4. Add Extra Starting Potions from Trials!
     const extraPotions = this.getExtraPotions();

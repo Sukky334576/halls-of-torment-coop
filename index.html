@@ -53,6 +53,23 @@
       pointer-events: auto;
     }
 
+    /* The gameplay HUD chrome is mounted once at boot and left in the DOM permanently — it was
+       relying purely on the lobby's higher z-index to stay covered, which the impeccable layout
+       scan caught as real overlap (HUD text/buttons sitting under lobby panels, not actually
+       removed from the layout). Hide it outright outside a match. #game-over-modal is excluded:
+       it toggles its own display and GAME_OVER clears .in-game before showing it. */
+    body:not(.in-game) .hud-top-bar,
+    body:not(.in-game) #hud-shrine-buff,
+    body:not(.in-game) #hud-boss-banner,
+    body:not(.in-game) .hud-volume-panel,
+    body:not(.in-game) #party-frames,
+    body:not(.in-game) .wasd-controller,
+    body:not(.in-game) .hud-bottom-bar,
+    body:not(.in-game) .damage-canvas,
+    body:not(.in-game) .minimap-wrapper {
+      display: none !important;
+    }
+
     /* --- CURSOR MANAGEMENT: Hide OS Mouse Cursor During Gameplay --- */
     body.in-game,
     body.in-game #app,
@@ -111,7 +128,11 @@
     .lobby-screen {
       position: absolute;
       inset: 0;
-      background: radial-gradient(circle at center, rgba(16, 22, 34, 0.94) 0%, rgba(4, 5, 8, 0.98) 100%);
+      /* Solid base color first: the radial-gradient alone tops out at 94-98% opacity, which was
+         letting the always-mounted (but supposedly hidden) in-game HUD underneath ghost through
+         faintly at the edges. A fully opaque backing layer guarantees it can never show through. */
+      background-color: #06070a;
+      background-image: radial-gradient(circle at center, rgba(16, 22, 34, 0.94) 0%, rgba(4, 5, 8, 0.98) 100%);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -281,6 +302,16 @@
     .chamber-canvas-wrapper {
       position: relative;
       width: 100%;
+      /* The chamber is the primary element on this screen (squint test: it's what the eye
+         lands on first) but was capped to a fixed 350/450px while the top bar and bottom
+         panel took only their natural height — on any viewport taller than that sum, the
+         rest just sat empty below the party panel. Growing this into the leftover space
+         (instead of hard-capping it) puts that space toward the thing worth looking at. */
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       border: 2px solid #231c12;
       border-radius: 3px;
       overflow: hidden;
@@ -288,17 +319,19 @@
       box-shadow: inset 0 0 30px rgba(0,0,0,0.95), 0 4px 20px rgba(0,0,0,0.8);
     }
 
+    /* width:100% paired with only max-height (no matching max-width) let the box
+       stretch full-bleed on wide viewports while height stayed clamped, squashing
+       the scene horizontally. Making both axes 'auto' with max-width/max-height
+       lets the browser pick the largest size that fits both while preserving the
+       canvas's real 1600x540 aspect ratio, on any viewport size. max-height reads
+       from the flex-grown wrapper's own box rather than a fixed px, so the scene
+       fills whatever room is left above/below it instead of stopping short. */
     #lobby-stage-canvas {
       display: block;
-      width: 100%;
+      width: auto;
       height: auto;
-      max-height: 350px;
-    }
-
-    @media (min-height: 900px) {
-      #lobby-stage-canvas {
-        max-height: 450px;
-      }
+      max-width: 100%;
+      max-height: 100%;
     }
 
     /* Bottom Panel */
@@ -470,6 +503,7 @@
       font-size: 0.73rem;
       color: #94a3b8;
       line-height: 1.35;
+      max-width: 55ch;
     }
 
     .inspector-specs {
@@ -1005,6 +1039,60 @@
       color: #ffd166;
       font-weight: 900;
       text-shadow: 0 0 12px rgba(255, 209, 102, 0.8);
+    }
+
+    /* Final-boss execute deadline countdown — sits below the boss banner (both can be
+       visible at once during the wave-30 fight) and pulses to keep it urgent-feeling
+       without being so aggressive it becomes unreadable. */
+    .hud-deadline-banner {
+      position: absolute;
+      top: 118px;
+      left: 50%;
+      transform: translateX(-50%);
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      text-align: center;
+      background: rgba(20, 2, 4, 0.94);
+      border: 2px solid #991b1b;
+      border-radius: 8px;
+      padding: 5px 20px;
+      box-shadow: 0 0 24px rgba(153, 27, 27, 0.7), 0 4px 14px rgba(0,0,0,0.9);
+      z-index: 15;
+      pointer-events: none;
+      animation: deadlinePulse 1.4s ease-in-out infinite;
+    }
+
+    .deadline-banner-label {
+      font-size: 0.62rem;
+      letter-spacing: 1.5px;
+      color: #fca5a5;
+      font-weight: 800;
+    }
+
+    .deadline-banner-timer {
+      font-size: 1.3rem;
+      letter-spacing: 1px;
+      color: #ff4d4d;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+      text-shadow: 0 0 14px rgba(255, 77, 77, 0.9);
+    }
+
+    @keyframes deadlinePulse {
+      0%, 100% { box-shadow: 0 0 24px rgba(153, 27, 27, 0.7), 0 4px 14px rgba(0,0,0,0.9); }
+      50% { box-shadow: 0 0 38px rgba(239, 68, 68, 0.95), 0 4px 14px rgba(0,0,0,0.9); }
+    }
+
+    /* Full-screen tint that ramps in during the final minute before the execute deadline —
+       opacity is driven from HUD.updateDeadlineWarning(), not this rule. */
+    .hud-deadline-vignette {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 14;
+      background: radial-gradient(ellipse at center, rgba(153, 0, 0, 0) 45%, rgba(153, 0, 0, 0.85) 100%);
+      transition: opacity 0.3s ease;
     }
 
     .hud-volume-panel {
@@ -2001,15 +2089,24 @@
     }
 
     /* Runic Header */
+    /* Two fixed rows — title/coins and the tab strip — so a per-class subtitle of any
+       length can never reflow into (or steal a row from) the tab strip or vice versa.
+       Only .poe-class-tabs below wraps internally, and only with itself. */
     .poe-tree-header {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
+      flex-direction: column;
+      gap: 10px;
       padding: 14px 24px;
       background: linear-gradient(180deg, #141b2a 0%, #0c101a 100%);
       border-bottom: 2px solid #334155;
       z-index: 10;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+    }
+    .poe-header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
       flex-wrap: wrap;
       row-gap: 10px;
     }
@@ -2042,6 +2139,8 @@
     .poe-header-center {
       display: flex;
       align-items: center;
+      justify-content: center;
+      width: 100%;
     }
     .poe-class-tabs {
       display: flex;
@@ -2113,6 +2212,61 @@
       color: #94a3b8;
       font-size: 0.7rem;
       font-weight: 700;
+    }
+
+    .poe-pending-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(74, 4, 78, 0.35);
+      border: 1px solid #c026d3;
+      border-radius: 20px;
+      padding: 6px 12px;
+      box-shadow: 0 0 14px rgba(192, 38, 211, 0.35);
+    }
+    .poe-pending-summary .pending-count {
+      color: #f0abfc;
+      font-size: 0.78rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .poe-pending-summary .pending-cost {
+      color: #fca5a5;
+      font-size: 0.78rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .poe-btn-pending-clear {
+      background: transparent;
+      color: #94a3b8;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-family: 'Cinzel', serif;
+      font-size: 0.72rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .poe-btn-pending-clear:hover {
+      color: #f87171;
+      border-color: #f87171;
+    }
+    .poe-btn-pending-confirm {
+      background: linear-gradient(135deg, #c026d3, #7c3aed);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-family: 'Cinzel', serif;
+      font-size: 0.78rem;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(192, 38, 211, 0.6);
+      transition: filter 0.15s ease;
+    }
+    .poe-btn-pending-confirm:hover {
+      filter: brightness(1.2);
     }
 
     .poe-btn-close {
@@ -2207,10 +2361,26 @@
       height: 700px;
       pointer-events: none;
       z-index: 1;
+      /* viewBox is a fixed "0 0 1000 700" (1 SVG unit = 1px, same coordinate system
+         node divs use for their left/top), but this session's ascension-tier and
+         universal-basic additions pushed real node coordinates as far as x:-553..1553,
+         y:-546..1249 — well outside that box. The SVG's default overflow:hidden was
+         silently clipping every connector segment that falls outside the original
+         1000x700 frame, which is what actually caused branches to look unconnected
+         (this was NOT a color/contrast issue — those nodes' lines were never drawn at
+         all). Node divs aren't SVG content so they were never clipped, only the paths
+         connecting to/from them — hence "isolated-looking" nodes with real connections. */
+      overflow: visible;
     }
     .poe-root-tendril {
       stroke-linecap: round;
       transition: stroke 0.3s ease, stroke-width 0.3s ease;
+      /* #poe-world is scaled via a CSS transform (zoom can go as low as 15% for large
+         trees — see MIN_ZOOM), which shrinks stroke width proportionally. Without this,
+         a 2.5px dashed "locked" line becomes well under 1 physical pixel at low zoom and
+         disappears regardless of color/contrast. non-scaling-stroke keeps the stroke
+         (width AND dash pattern) a constant screen size at any zoom level. */
+      vector-effect: non-scaling-stroke;
     }
     .poe-root-tendril.branch-allocated {
       stroke: #ffd166;
@@ -2223,10 +2393,21 @@
       animation: rootFlow 1.2s linear infinite;
     }
     .poe-root-tendril.branch-locked {
-      stroke: #1e2433;
-      stroke-width: 2.5px;
-      stroke-dasharray: 4 4;
-      opacity: 0.55;
+      /* Was #1e2433 @ 0.55 opacity — ~1.15:1 contrast against the #090c14 viewport
+         background, i.e. invisible. First pass moved to #55698c @ opacity 1 (~3:1,
+         still dashed 2.5px) but a thin DASHED line still reads as a row of disconnected
+         specks rather than a connector once it's small on screen (default auto-fit zoom
+         goes down to 15% for large trees). Solid + brighter + slightly thicker removes
+         that failure mode entirely instead of relying on a borderline contrast ratio. */
+      stroke: #6b7fa3;
+      stroke-width: 3px;
+      opacity: 1;
+    }
+    .poe-root-tendril.branch-pending {
+      stroke: #e879f9;
+      stroke-width: 3.5px;
+      stroke-dasharray: 6 4;
+      animation: rootFlow 1s linear infinite;
     }
 
     @keyframes rootFlow {
@@ -2236,6 +2417,32 @@
     @keyframes pulseGlow {
       from { stroke: #eab308; }
       to { stroke: #fde047; }
+    }
+
+    /* Branch Category Labels (prototype, decorative only) */
+    .poe-category-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1000px;
+      height: 700px;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .poe-category-label {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      font-family: 'Cinzel', serif;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      padding: 4px 14px;
+      border: 1px solid;
+      border-radius: 999px;
+      background: rgba(10, 13, 19, 0.6);
+      opacity: 0.85;
+      text-shadow: 0 0 8px currentColor;
     }
 
     /* Node Sockets */
@@ -2256,9 +2463,29 @@
       cursor: pointer;
       transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
+    .poe-node-socket:focus-visible {
+      outline: 2px solid #00f5d4;
+      outline-offset: 4px;
+      border-radius: 50%;
+    }
+    /* Invisible tap/click target — sized in renderNodes() so it stays a comfortable
+       fixed screen size even when the tree is zoomed way out for an overview. */
+    .node-hit-area {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+    }
     .poe-node-socket:hover {
       transform: translate(-50%, -50%) scale(1.18);
       z-index: 30;
+    }
+    /* Marks which node the cursor is on with a darker fill + bright ring, instead of
+       floating text — the tooltip card already carries the name and description. */
+    .poe-node-socket:hover .node-frame {
+      background: #000000;
+      box-shadow: 0 0 22px rgba(255, 255, 255, 0.65), inset 0 0 12px rgba(0, 0, 0, 0.95);
     }
 
     .node-frame {
@@ -2304,6 +2531,13 @@
       font-size: 1rem;
       border: 2px solid #64748b;
     }
+    /* Prototype: "universal basic" nodes get a dashed outline ring layered on top of
+       whatever state/type coloring already applies, so they stand out at a glance
+       without fighting the !important state-color rules below. */
+    .poe-node-socket.is-universal-basic .node-frame {
+      outline: 2px dashed #e2e8f0;
+      outline-offset: 3px;
+    }
 
     /* Node States */
     .poe-node-socket.state-allocated .node-frame {
@@ -2322,10 +2556,20 @@
       background: #0a0e16;
       opacity: 0.5;
     }
+    .poe-node-socket.state-pending .node-frame {
+      border-color: #e879f9 !important;
+      background: radial-gradient(circle at center, #581c87 0%, #0a0e16 100%);
+      box-shadow: 0 0 16px rgba(232, 121, 249, 0.6);
+      animation: pendingPulse 1.2s ease-in-out infinite;
+    }
 
     @keyframes availablePulse {
       0%, 100% { transform: scale(1); box-shadow: 0 0 10px rgba(0, 245, 212, 0.4); }
       50% { transform: scale(1.06); box-shadow: 0 0 20px rgba(0, 245, 212, 0.8); }
+    }
+    @keyframes pendingPulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 12px rgba(232, 121, 249, 0.5); }
+      50% { transform: scale(1.1); box-shadow: 0 0 24px rgba(232, 121, 249, 0.9); }
     }
 
     /* Badges */
@@ -2365,6 +2609,19 @@
       font-size: 0.7rem;
       opacity: 0.8;
     }
+    .node-badge-pending {
+      position: absolute;
+      bottom: -10px;
+      background: #4a044e;
+      color: #f0abfc;
+      border: 1px solid #c026d3;
+      font-size: 0.65rem;
+      font-weight: 800;
+      padding: 1px 5px;
+      border-radius: 8px;
+      white-space: nowrap;
+      box-shadow: 0 0 8px rgba(192, 38, 211, 0.5);
+    }
 
     .node-label-pill {
       margin-top: 6px;
@@ -2382,6 +2639,12 @@
       pointer-events: none;
       text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+      /* The name pill stays hidden even on hover — the tooltip card already shows name +
+         description together, so a second floating label would just be a duplicate popup.
+         Which node is focused is instead shown on the node itself (see the hover rule on
+         .node-frame below), not with more text. */
+      opacity: 0;
+      visibility: hidden;
     }
     .state-allocated .node-label-pill {
       color: #ffd166;
@@ -2390,6 +2653,10 @@
     .state-available .node-label-pill {
       color: #00f5d4;
       border-color: #0d9488;
+    }
+    .state-pending .node-label-pill {
+      color: #e879f9;
+      border-color: #86198f;
     }
 
     /* Node Shake Animation */
@@ -2480,6 +2747,7 @@
     .tooltip-type-badge.type-root { color: #ffd166; }
     .tooltip-type-badge.type-notable { color: #38bdf8; }
     .tooltip-type-badge.type-keystone { color: #a855f7; }
+    .tooltip-type-badge.is-universal-basic { color: #e2e8f0; }
     .tooltip-title {
       font-size: 1.15rem;
       color: #f8f9fa;
@@ -2522,6 +2790,11 @@
       background: rgba(239, 68, 68, 0.15);
       color: #f87171;
       border: 1px solid #ef4444;
+    }
+    .status-pending {
+      background: rgba(192, 38, 211, 0.2);
+      color: #f0abfc;
+      border: 1px solid #e879f9;
     }
 
     @keyframes shake {

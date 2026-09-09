@@ -23,6 +23,11 @@ export class ServerPlayer implements GridEntity {
   // Late joiners pick their own catch-up cards instead of inheriting a teammate's build —
   // this counts down one level-up choice at a time until they reach the party's level.
   public catchUpChoicesRemaining: number = 0;
+  // A second (or third...) level-up landed from a different EXP source while a card was
+  // already on screen (e.g. an EXP gem and a treasure chest both crossing a level threshold
+  // in the same tick) — queued here instead of firing a second LEVEL_UP_CHOICE that would
+  // silently replace the first. See GameRoom.startLevelUpChoice/handleSelectTrait.
+  public pendingLevelUpChoices: number = 0;
   // Set while their connection is down but their character is kept alive for a grace
   // period in case they reconnect (see GameRoom.disconnectPlayer/reconnectPlayer).
   public isDisconnected: boolean = false;
@@ -99,48 +104,34 @@ export class ServerPlayer implements GridEntity {
     }
     if (treePassives) {
       this.treePassives = treePassives;
-      if (treePassives.flatExpMultiplierPct !== undefined) {
-        this.stats.expMultiplier = 1.0 + (treePassives.flatExpMultiplierPct / 100);
+      // Field names match PlayerStats (shared/types.ts) directly — no flatXxx/flatXxxPct
+      // translation layer. Values are still contributions to scale or add into the base
+      // stat, not finished values; see MetaProgression.getPassiveTiersForClass() for how
+      // each one was derived (STAT_SCALE_FACTORS there matches the /100 or *N used below).
+      if (treePassives.expMultiplier !== undefined) {
+        this.stats.expMultiplier = 1.0 + (treePassives.expMultiplier / 100);
       }
-      if (treePassives.flatMaxHp !== undefined) {
-        this.stats.maxHp += treePassives.flatMaxHp;
+      if (treePassives.maxHp !== undefined) {
+        this.stats.maxHp += treePassives.maxHp;
         this.stats.hp = this.stats.maxHp;
-      } else if (treePassives.maxHp) {
-        this.stats.maxHp += treePassives.maxHp * 15;
-        this.stats.hp = this.stats.maxHp;
       }
-
-      if (treePassives.flatDefense !== undefined) {
-        this.stats.defense += treePassives.flatDefense;
-      } else if (treePassives.defense) {
-        this.stats.defense += treePassives.defense * 2;
+      if (treePassives.defense !== undefined) {
+        this.stats.defense += treePassives.defense;
       }
-
-      if (treePassives.flatMoveSpeedPct !== undefined) {
-        this.stats.moveSpeed *= (1.0 + treePassives.flatMoveSpeedPct / 100);
-      } else if (treePassives.moveSpeed) {
-        // Nerfed from +5% to +2.5% per point
-        this.stats.moveSpeed *= (1.0 + treePassives.moveSpeed * 0.025);
+      if (treePassives.moveSpeed !== undefined) {
+        this.stats.moveSpeed *= (1.0 + treePassives.moveSpeed / 100);
       }
-
-      if (treePassives.flatPickupRadiusPct !== undefined) {
-        this.stats.pickupRadius *= (1.0 + treePassives.flatPickupRadiusPct / 100);
-      } else if (treePassives.pickupRadius) {
-        // Nerfed from +15% to +7% per point
-        this.stats.pickupRadius *= (1.0 + treePassives.pickupRadius * 0.07);
+      if (treePassives.pickupRadius !== undefined) {
+        this.stats.pickupRadius *= (1.0 + treePassives.pickupRadius / 100);
       }
-
-      if (treePassives.flatDamageBonusPct !== undefined) {
-        this.stats.damageBonus += treePassives.flatDamageBonusPct / 100;
-      } else if (treePassives.damageBonus) {
-        this.stats.damageBonus += treePassives.damageBonus * 0.08;
+      if (treePassives.damageBonus !== undefined) {
+        this.stats.damageBonus += treePassives.damageBonus / 100;
       }
-
-      if (treePassives.flatCritChancePct !== undefined) {
-        this.stats.critChance += treePassives.flatCritChancePct / 100;
+      if (treePassives.critChance !== undefined) {
+        this.stats.critChance += treePassives.critChance / 100;
       }
-      if (treePassives.flatAttackSpeedPct !== undefined) {
-        this.stats.attackSpeed *= (1.0 + treePassives.flatAttackSpeedPct / 100);
+      if (treePassives.attackSpeed !== undefined) {
+        this.stats.attackSpeed *= (1.0 + treePassives.attackSpeed / 100);
       }
       if (treePassives.extraRerolls !== undefined) {
         this.potionRerolls += treePassives.extraRerolls;
@@ -151,8 +142,8 @@ export class ServerPlayer implements GridEntity {
       if (treePassives.extraLocks !== undefined) {
         this.potionLocks += treePassives.extraLocks;
       }
-      if (treePassives.flatTierLuckPct !== undefined) {
-        this.stats.tierLuck = treePassives.flatTierLuckPct;
+      if (treePassives.tierLuck !== undefined) {
+        this.stats.tierLuck = treePassives.tierLuck;
       }
     }
   }
@@ -295,6 +286,27 @@ export class ServerPlayer implements GridEntity {
         return false; // Saved by Nine Lives!
       }
 
+      this.stats.hp = 0;
+      this.isDead = true;
+      this.reviveTimer = 0;
+      return true; // Just died
+    }
+    return false;
+  }
+
+  /**
+   * Damage that bypasses armor mitigation, Nine Lives, invulnerability, and dash i-frames —
+   * exists specifically for HordeDirector's final-boss execute deadline (see GameRoom.tick()),
+   * which must guarantee death through any survivability mechanic since the whole point is
+   * forcing an unkillable match to actually end. Still respects isChoosingTrait/isDisconnected/
+   * isDead exactly like takeDamage() does: those mean the player is already out of the fight
+   * entirely, not a defense that an unavoidable execute should have to punch through.
+   */
+  public applyTrueDamage(amount: number): boolean {
+    if (this.isDead || this.isChoosingTrait || this.isDisconnected) return false;
+
+    this.stats.hp -= amount;
+    if (this.stats.hp <= 0) {
       this.stats.hp = 0;
       this.isDead = true;
       this.reviveTimer = 0;
