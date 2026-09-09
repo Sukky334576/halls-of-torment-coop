@@ -6,7 +6,9 @@
 
 ## 1. Project Overview & Core Vision
 
-**Torment of Souls** is a 4-player cooperative dark fantasy roguelike survival game inspired by *Halls of Torment* and *Diablo II*, engineered with high-performance web technologies (**TypeScript, Node.js Authoritative Server, WebSockets, Three.js 3D & Canvas 2.5D Rendering**).
+**Torment of Souls** is a 4-player cooperative dark fantasy roguelike survival game inspired by *Halls of Torment* and *Diablo II*, engineered with high-performance web technologies (**TypeScript, Node.js Authoritative Server, WebSockets, Canvas2D Rendering**).
+
+> Rendering note (corrected 2026-09-09): the live render path is **100% Canvas2D** — `Renderer.ts` (Three.js/WebGL) and `InstancedHorde.ts` exist in the source tree but are never imported or instantiated anywhere in the client. Don't extend them expecting them to run; see §2 directory notes.
 
 ### Core Highlights:
 - **True Co-op Multiplayer**: 1 to 4 players simultaneously combating thousands of demonic entities on screen with authoritative physics and server-side hit detection.
@@ -51,11 +53,12 @@ halls-of-torment-coop/
 │   └── client/                # Browser Client Application
 │       ├── main.ts            # Client network controller, loop runner, state interpolator, input handling
 │       ├── engine/
-│       │   ├── Renderer.ts    # 3D Three.js scene
-│       │   ├── Renderer2D.ts  # 2D Canvas dynamic lighting/rendering
-│       │   ├── InstancedHorde.ts# Instanced 3D rendering for large monster counts
-│       │   ├── HordeSpriteRenderer.ts# 2.5D monster sprite batching
+│       │   ├── Renderer.ts    # ⚠️ DEAD CODE — Three.js/WebGL scene, never instantiated by GameApp
+│       │   ├── Renderer2D.ts  # THE live renderer — Canvas2D, resolution scale + DPR cap driven by GraphicsSettings
+│       │   ├── InstancedHorde.ts# ⚠️ DEAD CODE — Three.js InstancedMesh horde renderer, never instantiated
+│       │   ├── HordeSpriteRenderer.ts# The actual live horde renderer — Canvas2D sprite-sheet batching
 │       │   ├── SpriteSheetGenerator.ts# Procedural pixel-art sprite generation
+│       │   ├── GraphicsSettings.ts# Low/Medium/High render-quality setting (localStorage), cycled from EscMenuUI
 │       │   ├── I18n.ts        # Bilingual Thai & English dictionary + language switching
 │       │   ├── MetaProgression.ts# LocalStorage persistence (coins, unlocks, vault)
 │       │   └── SoundManager.ts# Web Audio API synthesizers & sound effects
@@ -76,7 +79,7 @@ halls-of-torment-coop/
 └── scratch/                   # Developer tools, CLI airdrop scripts, Puppeteer e2e tests
 ```
 
-> Directory tree audited against the actual source tree on 2026-09-07 — update this section whenever files are added, renamed, or removed so it doesn't drift again.
+> Directory tree audited against the actual source tree on 2026-09-09 — update this section whenever files are added, renamed, or removed so it doesn't drift again.
 
 ---
 
@@ -148,6 +151,7 @@ The Skill Tree is modeled after the *Path of Exile* constellation web:
   - *Notable Nodes*: Unique combat perks (e.g. Outlaw Gold Bag, Golden Sixes, Astral Aegis).
   - *Keystones*: Game-changing build modifiers (e.g. Converting excess heal into absorption shields).
 - **Persistence**: Saved automatically in `localStorage` under `torment_meta_save_v2`.
+- **Safeguards**: `MetaProgression.canAllocateNode()` rejects spending on a node whose `classType` hero isn't unlocked, and `SkillTreeUI` shows a confirm dialog ("Spend N Gold to permanently unlock X?") before any node purchase — both added after a bug allowed spending gold on classes the player didn't own with no confirmation.
 
 ---
 
@@ -166,10 +170,16 @@ The Skill Tree is modeled after the *Path of Exile* constellation web:
 ## 8. Networking & Server Engine
 
 ### 8.1 Architecture
-- **Protocol**: Raw WebSockets using lightweight JSON messaging (`types.ts`).
-- **Tick Rate**: **20 Hz (50ms per tick)** for optimal network efficiency and smooth client interpolation.
+- **Protocol**: Raw WebSockets using lightweight JSON messaging (`types.ts`). The `TICK` payload is serialized **once per room per tick** (`broadcastToRoom()` in `server.ts`) and reused for every connected client, not re-stringified per player.
+- **Tick Rate**: **25 Hz (40ms per tick)**, see `GAME_CONSTANTS.SERVER_TICK_RATE`/`SERVER_TICK_MS` in `constants.ts`.
 - **Authoritative Simulation**: Monster health, movement, knockbacks, item drops, and cooldowns are calculated strictly on the server to prevent cheating or desync.
-- **Spatial Hash Grid**: `SpatialGrid.ts` partitions the $4,500 \times 4,500$ map into $128\text{px}$ cells, enabling $O(1)$ collision and radius checks for over 2,000 entities simultaneously without lag.
+- **Spatial Hash Grid**: `SpatialGrid.ts` partitions the $4,500 \times 4,500$ map into $150\text{px}$ cells (`GAME_CONSTANTS.SPATIAL_CELL_SIZE`), enabling $O(1)$ collision and radius checks. Measured live: at the documented worst case (4 players, 740 monsters — the `HordeDirector.ts` cap of `380 + (playerCount-1)*120` — plus 150 projectiles), a full `tick()` averages **~0.9ms** (worst observed ~4.4ms) against the 40ms budget, and the resulting JSON payload is **~78KB/tick/client** (~1.9MB/s at 25Hz) since WebSocket compression (`perMessageDeflate`) is not currently enabled.
+- **Single-room design**: `server.ts` holds one global `currentRoom` — the server hosts exactly one active match (up to 4 players) at a time, not a multi-tenant matchmaking backend.
+
+### 8.1.1 Reliability: Reconnect & Party Codes
+- **Device identity**: the client generates a persistent `deviceId` (`localStorage: torment_device_id`, `main.ts`) independent of the WebSocket connection, used as the player's key inside `GameRoom` instead of the ephemeral per-connection id.
+- **Disconnect grace period**: a dropped connection mid-match calls `GameRoom.disconnectPlayer()`, which ghosts the character (untargetable, `ServerPlayer.isDisconnected`) and starts a `GAME_CONSTANTS.RECONNECT_GRACE_MS` (60s) timer before the character is actually removed. Reconnecting within that window (`reconnectPlayer()`) resumes the same level/gold/position instead of a fresh character.
+- **Party code**: an optional `PARTY_CODE` env var gates `JOIN_LOBBY` — clients must supply a matching `?code=` query param (`JOIN_REJECTED` otherwise). Unset by default for frictionless LAN/local testing.
 
 ### 8.2 Live GM Airdrop Engine
 The server includes a dual HTTP/WebSocket administrative endpoint on port 8080:
@@ -230,6 +240,33 @@ GET /api/grant-gold?amount=35000
 1. Open `src/server/engine/GameRoom.ts` and locate `damageMonster()`.
 2. Add a new reaction conditional checking `monster.hasStatus(elemA)` and `sourceElement === elemB`.
 3. Define multiplier, visual shockwave projectile, and floating text label.
+
+---
+
+## 11. Co-op Gold Economy & Trait Power Tiers
+
+### 11.1 Personal Gold Wallets
+Gold is **per-player, not a shared team pool**: `ServerPlayer.gold` credits whoever actually collects a `GOLD_COIN` or `TREASURE_CHEST` pickup (`handlePickupCollection()` in `GameRoom.ts`). A run's `GAME_OVER` payload reports `personalGold` (this player's own collected total) separately from a small leftover `teamGold`/`playerCount` bucket (server-granted airdrops, starting gift) that's still split evenly across the party. EXP remains fully shared team-wide regardless of who lands the kill.
+
+### 11.2 Power Tiers (S/A/B/C/D)
+Every trait card's `rarity` maps 1:1 to a power tier via `getPowerTier()` in `classes.ts`:
+
+| Rarity | Tier | Relative drop weight | Effect multiplier (`TIER_POWER_MULTIPLIER`) |
+|---|---|---|---|
+| Mythic | S | rarest | ×2.2 |
+| Legendary | A | rare | ×1.7 |
+| Epic | B | uncommon | ×1.35 |
+| Rare | C | common | ×1.0 (baseline) |
+| Common | D | most common | ×0.7 |
+
+Tier affects **both** drop odds (`getTierWeight(rarity, tierLuckPct)`, shifted by the `flatTierLuckPct` skill-tree keystone) and the actual magnitude of a card's effect — a D-tier and an S-tier card with the same theme (e.g. both granting Max HP) differ in value proportionally to `TIER_POWER_MULTIPLIER`, not just in how often they appear. The tier letter and a color-coded badge (matching the card's rarity border) render on every level-up card in `TraitSelector.ts`; cards flagged `isSignature` (a class's personal skill, gated behind unlocking it in the Skill Tree) additionally show a cyan "Signature Skill" badge so they read as visually distinct from universal cards.
+
+### 11.3 Magnet Pickup
+A low-chance (`GAME_CONSTANTS.MAGNET_DROP_CHANCE`, 1.5% per kill) pickup that, when collected, sweeps every EXP gem and gold coin currently on the map to the collecting player with a cosmetic pull-in spark animation (`MAGNET_PULL_SPARK` projectile, purely visual — it does not change who ends up keeping the gold, that's still decided by the personal-wallet rule above).
+
+## 12. Performance & Graphics Quality
+- **Server**: broadcast payload is serialized once per room per tick (§8.1); `VFX2D.ts` avoids `ctx.shadowBlur`/regenerated gradients on the highest-frequency draws (EXP gems, gold coins); `MiniMap.ts` caches its background radial gradient instead of rebuilding it every frame.
+- **Client Graphics Quality setting** (`GraphicsSettings.ts`, cycled from the ESC menu footer): Low/Medium/High presets scale the Canvas2D backing-buffer resolution (`dprCap` × `renderScale`) live, no reload required. **Medium is the default and matches pre-setting behavior exactly** (dprCap 1.5, renderScale 1.0), so existing play is unaffected unless a player opts into Low (dprCap 1.0 × 0.75 — roughly half the pixels to fill, reads as a deliberate retro pixel-art look since the canvas already renders with `image-rendering: pixelated`) or High (dprCap 2.0, for crisper output on high-DPI displays with headroom to spare).
 
 ---
 *Created and maintained with Antigravity AI — Built for limitless dark fantasy co-op survival.*

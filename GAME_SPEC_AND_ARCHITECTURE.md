@@ -13,7 +13,7 @@
 - [~] Survival Stage แบบจับเวลา พร้อม Early/Mid/End Phase — **แก้ไข (เดิมเขียนผิดว่าไม่มี — grep ครั้งแรกพลาดเพราะไม่ใส่ `-i` เลยไม่เจอ `WAVE_DURATION_SEC`):** มีระบบจับเวลาจริง `WAVE_DURATION_SEC = 40` วินาที/เวฟ × 30 เวฟ ≈ 20 นาทีรวม ([HordeDirector.ts:17](src/server/engine/HordeDirector.ts:17)) ใกล้เคียงกับดีไซน์เดิมมาก แต่เป็น 20 นาที ไม่ใช่ 30 และไม่ได้แบ่งชื่อ Early/Mid/End Phase ตามที่อธิบายไว้
 - [x] บอส "Lord of Torment" — **แก้ไข (เดิมเขียนผิดว่าไม่มี):** implement จริง สปอนเป็นบอสเวฟที่ 30 ([HordeDirector.ts:191](src/server/engine/HordeDirector.ts:191)), ฆ่าแล้ว trigger `GAME_OVER` victory ([GameRoom.ts:2138](src/server/engine/GameRoom.ts:2138)) — จังหวะจริงอยู่ที่ ~20 นาที ไม่ใช่ 30:00 เป๊ะ แต่กลไก "เวฟสุดท้าย = บอสจบเกม" มีจริง
 - [ ] Well Shrines โผล่กลางด่านให้ส่งเกียร์ขึ้นบ่อ — `SEND_WELL_GEAR` message ประกาศไว้ใน [types.ts:360](src/shared/types.ts:360) แต่ client ไม่เคยส่ง และ server ไม่มี handler
-- [~] Run Complete ได้ Gold + ปลดล็อกเกียร์ถาวร — ได้ Gold จริง (`teamGold`) แต่การปลดล็อกเกียร์ผ่านบ่อน้ำยังไม่มี
+- [~] Run Complete ได้ Gold + ปลดล็อกเกียร์ถาวร — ได้ Gold จริง แต่เป็นกระเป๋าส่วนตัวต่อผู้เล่น (`personalGold`, แก้ไข 2026-09-09 — เดิมเป็น `teamGold` แบ่งเท่ากันทั้งทีม) ดู [GAME_SPEC.md §11.1](GAME_SPEC.md); การปลดล็อกเกียร์ผ่านบ่อน้ำยังไม่มี
 
 **Character Classes**
 - [🔄] ตารางนี้มีแค่ 4 คลาส (Swordsman/Archer/Sorceress/Cleric) — ของจริงมี **9 คลาส** แล้ว (ดู [GAME_SPEC.md §3](GAME_SPEC.md)) เอกสารนี้สะท้อนสโคปยุคแรกก่อนขยายคลาส
@@ -29,8 +29,8 @@
 - [ ] Wellkeeper Shared Haul (ทีมปลดล็อกเกียร์ที่เพื่อนส่งบ่อน้ำร่วมกัน) — ช่องว่างเดียวกับ Well Shrine ด้านบน
 
 **Architecture (ภาคที่ 2)**
-- [🔄] Three.js InstancedMesh แบบ 3D ล้วน + Binary-packed WebSocket state — ของจริงใช้ JSON over WebSocket ([types.ts](src/shared/types.ts)) แบบ hybrid 3D (Three.js) + 2D Canvas ไม่ได้ pack เป็น binary
-- [x] Node.js authoritative server + Spatial Hash Grid + tick 20Hz — มีจริง ตรงกับ [GAME_SPEC.md §8.1](GAME_SPEC.md)
+- [🔄] Three.js InstancedMesh แบบ 3D ล้วน + Binary-packed WebSocket state — **แก้ไข (2026-09-09):** ของจริงใช้ JSON over WebSocket ([types.ts](src/shared/types.ts)) แบบ **Canvas2D ล้วน ไม่ใช่ hybrid** — `Renderer.ts`/`InstancedHorde.ts` (Three.js/WebGL) มีอยู่ในซอร์สแต่เป็น dead code ไม่เคยถูก instantiate เลย ไม่ได้ pack เป็น binary
+- [x] Node.js authoritative server + Spatial Hash Grid + tick — **แก้ไข (2026-09-09, เดิมเขียนผิดว่า 20Hz):** จริงๆ คือ **25Hz (40ms/tick)** ตรงกับ [GAME_SPEC.md §8.1](GAME_SPEC.md)
 - [ ] Export เป็น `.exe` ด้วย Tauri สำหรับ Steam — ไม่พบ Tauri config/dependency ในโปรเจกต์
 
 **Legend:** [x] Implemented ・ [~] Partial ・ [ ] Not implemented ・ [🔄] Superseded by a different actual implementation

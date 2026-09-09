@@ -70,6 +70,6 @@ curl -X POST http://localhost:8080/api/grant-gold -H "Content-Type: application/
 ## 🛠️ โครงสร้างโปรเจกต์ (Project Structure)
 - src/shared/ : Types, hero/gear/skill-tree/stage data ที่ client-server ใช้ร่วมกัน
 - src/server/engine/ : Combat resolver, Elemental reaction system, Spatial hash grid, Horde director
-- src/client/engine/ : Renderer (3D + 2.5D), input, camera, meta-progression, sound
+- src/client/engine/ : Renderer (Canvas2D — the Three.js renderer in the same folder is unused dead code), input, camera, meta-progression, sound
 - src/client/ui/ : Lobby, Character Selection, Skill Tree, Gear Vault, Hall of Trials, HUD, Esc Menu
 - GAME_SPEC.md : Master Game Design Document & Formula Reference
