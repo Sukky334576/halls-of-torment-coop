@@ -47,26 +47,27 @@ export class LobbyUI {
   private stageCtx: CanvasRenderingContext2D | null = null;
   private animFrameId: number = 0;
 
-  // 2-Tier Sanctuary Configuration (1040 x 540 canvas)
+  // 2-Tier Sanctuary Configuration (1600 x 540 canvas — widened from the original 1040 so the
+  // scene actually fills wide viewports instead of being letterboxed at a narrower aspect ratio)
   // Back Tier: 5 Unlockable / Trial Heroes on elevated stone gallery (y = 255)
   // Front Tier: 4 Starter / Usable Heroes prominently in the foreground (y = 415)
   private pedestals: PedestalSlot[] = [
     // --- BACK TIER: 5 Sealed Trial Legends (Elevated stone gallery, y = 255) ---
-    { heroClass: PlayerClass.COMMANDO, x: 110, y: 255, radius: 40, name: 'Commando', icon: '', tier: 'BACK' },
-    { heroClass: PlayerClass.COWBOY, x: 310, y: 255, radius: 40, name: 'Cowboy', icon: '', tier: 'BACK' },
-    { heroClass: PlayerClass.CELESTIAL_MECHA, x: 520, y: 245, radius: 44, name: 'Celestial Mecha', icon: '', tier: 'BACK' },
-    { heroClass: PlayerClass.CAT_TANK, x: 730, y: 255, radius: 40, name: 'Cat Tank', icon: '', tier: 'BACK' },
-    { heroClass: PlayerClass.GAMBLER, x: 930, y: 255, radius: 40, name: 'Gambler', icon: '', tier: 'BACK' },
+    { heroClass: PlayerClass.COMMANDO, x: 206, y: 255, radius: 40, name: 'Commando', icon: '', tier: 'BACK' },
+    { heroClass: PlayerClass.COWBOY, x: 496, y: 255, radius: 40, name: 'Cowboy', icon: '', tier: 'BACK' },
+    { heroClass: PlayerClass.CELESTIAL_MECHA, x: 800, y: 245, radius: 44, name: 'Celestial Mecha', icon: '', tier: 'BACK' },
+    { heroClass: PlayerClass.CAT_TANK, x: 1105, y: 255, radius: 40, name: 'Cat Tank', icon: '', tier: 'BACK' },
+    { heroClass: PlayerClass.GAMBLER, x: 1395, y: 255, radius: 40, name: 'Gambler', icon: '', tier: 'BACK' },
 
     // --- FRONT TIER: 4 Starter Usable Champions (Grand foreground floor, y = 415) ---
-    { heroClass: PlayerClass.SWORDSMAN, x: 200, y: 415, radius: 48, name: 'Swordsman', icon: '', tier: 'FRONT' },
-    { heroClass: PlayerClass.ARCHER, x: 410, y: 415, radius: 48, name: 'Archer', icon: '', tier: 'FRONT' },
-    { heroClass: PlayerClass.SORCERESS, x: 630, y: 415, radius: 48, name: 'Sorceress', icon: '', tier: 'FRONT' },
-    { heroClass: PlayerClass.CLERIC, x: 840, y: 415, radius: 48, name: 'Cleric', icon: '', tier: 'FRONT' }
+    { heroClass: PlayerClass.SWORDSMAN, x: 336, y: 415, radius: 48, name: 'Swordsman', icon: '', tier: 'FRONT' },
+    { heroClass: PlayerClass.ARCHER, x: 641, y: 415, radius: 48, name: 'Archer', icon: '', tier: 'FRONT' },
+    { heroClass: PlayerClass.SORCERESS, x: 960, y: 415, radius: 48, name: 'Sorceress', icon: '', tier: 'FRONT' },
+    { heroClass: PlayerClass.CLERIC, x: 1264, y: 415, radius: 48, name: 'Cleric', icon: '', tier: 'FRONT' }
   ];
 
   // Gate of Torment position
-  private readonly gateX = 520;
+  private readonly gateX = 800;
   private readonly gateY = 145;
 
   // Gate Walk Animation State
@@ -74,9 +75,9 @@ export class LobbyUI {
   private walkStartTime: number = 0;
   private readonly walkDuration: number = 1600; // 1.6s dramatic entrance
   private walkingHeroState = {
-    startX: 170,
+    startX: 293,
     startY: 380,
-    currentX: 170,
+    currentX: 293,
     currentY: 380,
     scale: 1.35,
     alpha: 1.0
@@ -165,7 +166,7 @@ export class LobbyUI {
 
           <!-- Interactive 2.5D Hero Selection Chamber -->
           <div class="chamber-canvas-wrapper">
-            <canvas id="lobby-stage-canvas" width="1040" height="540"></canvas>
+            <canvas id="lobby-stage-canvas" width="1600" height="540"></canvas>
           </div>
 
           <!-- Bottom Panel: Hero Inspector & Crusade Controls -->
@@ -581,13 +582,13 @@ export class LobbyUI {
     ctx.fillStyle = '#0a0d14';
     ctx.fillRect(0, 298, w, 2);
 
-    // 4. Central Ceremonial Flight of Steps (x: 370 -> 670, y: 298 -> 330)
+    // 4. Central Ceremonial Flight of Steps (x: 583 -> 1018, y: 298 -> 330)
     // Avoids cutting across foreground champions on left/right wings
     const stepTreads = [
-      { y: 298, left: 390, right: 650 },
-      { y: 306, left: 380, right: 660 },
-      { y: 314, left: 370, right: 670 },
-      { y: 322, left: 360, right: 680 }
+      { y: 298, left: 612, right: 989 },
+      { y: 306, left: 597, right: 1003 },
+      { y: 314, left: 583, right: 1018 },
+      { y: 322, left: 568, right: 1032 }
     ];
     stepTreads.forEach((st, i) => {
       const sw = st.right - st.left;
@@ -600,17 +601,17 @@ export class LobbyUI {
     });
 
     // Shadowing on dais wings (behind front heroes) for smooth atmospheric depth
-    const leftShadow = ctx.createLinearGradient(0, 295, 370, 295);
+    const leftShadow = ctx.createLinearGradient(0, 295, 583, 295);
     leftShadow.addColorStop(0, 'rgba(8, 11, 17, 0.55)');
     leftShadow.addColorStop(1, 'rgba(8, 11, 17, 0.05)');
     ctx.fillStyle = leftShadow;
-    ctx.fillRect(0, 295, 370, 35);
+    ctx.fillRect(0, 295, 583, 35);
 
-    const rightShadow = ctx.createLinearGradient(1040, 295, 670, 295);
+    const rightShadow = ctx.createLinearGradient(w, 295, 1018, 295);
     rightShadow.addColorStop(0, 'rgba(8, 11, 17, 0.55)');
     rightShadow.addColorStop(1, 'rgba(8, 11, 17, 0.05)');
     ctx.fillStyle = rightShadow;
-    ctx.fillRect(670, 295, 370, 35);
+    ctx.fillRect(1018, 295, w - 1018, 35);
 
     // 5. Grand Foreground Sanctuary Floor (y: 330 -> 540)
     const floorGrad = ctx.createLinearGradient(0, 330, 0, h);
