@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import serveStatic from 'serve-static';
-import { ClientMessage, ServerMessage, PlayerClass } from '../shared/types';
+import { ClientMessage, ServerMessage, PlayerClass, RoomSummary } from '../shared/types';
 import { GameRoom } from './engine/GameRoom';
 import { createUser, findUserByUsername, getProgression, setProgression } from './db';
 import { hashPassword, verifyPassword, signToken, verifyToken, isRateLimited, USERNAME_RE, MIN_PASSWORD_LENGTH } from './auth';
@@ -34,8 +34,63 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // completely unreachable if you tried to run a build with `vite preview` standalone.
 const serveClientBuild = serveStatic(path.resolve(__dirname, '../../dist'), { fallthrough: true });
 const clients: Map<string, ConnectedClient> = new Map();
-let currentRoom: GameRoom | null = null;
 let nextClientId = 1;
+
+// Multiple concurrent rooms — anyone can create one or join any open one from the public
+// room browser (see main-menu -> multiplayer flow). Each room exists (players can join,
+// pick a class, ready up) before it's actually started; START_GAME starts the room the
+// sender is already in rather than creating a new one, unlike the old single-room model.
+interface RoomEntry {
+  room: GameRoom;
+  name: string;
+  hostClientId: string;
+}
+const MAX_PLAYERS_PER_ROOM = 4;
+const rooms: Map<string, RoomEntry> = new Map();
+let nextRoomId = 1;
+
+function getClientRoom(client: ConnectedClient): RoomEntry | undefined {
+  return client.roomId ? rooms.get(client.roomId) : undefined;
+}
+
+function roomSummaries(): RoomSummary[] {
+  return Array.from(rooms.entries()).map(([id, entry]) => ({
+    id,
+    name: entry.name,
+    hostName: entry.name,
+    playerCount: entry.room.getPlayerCount(),
+    maxPlayers: MAX_PLAYERS_PER_ROOM,
+    isStarted: entry.room.isStarted && !entry.room.isOver
+  }));
+}
+
+// Only pushed to clients who are actually browsing (not already in a room) — everyone else
+// doesn't need it and would just be wasted sends on every create/join/leave/start.
+function broadcastRoomList() {
+  const msg: ServerMessage = { type: 'ROOM_LIST', rooms: roomSummaries() };
+  const payload = JSON.stringify(msg);
+  for (const client of clients.values()) {
+    if (!client.roomId && client.ws.readyState === WebSocket.OPEN) {
+      client.ws.send(payload);
+    }
+  }
+}
+
+function broadcastRoomState(roomId: string) {
+  const entry = rooms.get(roomId);
+  if (!entry) return;
+  const playerList = Array.from(clients.values())
+    .filter((c) => c.roomId === roomId)
+    .map((c) => ({ id: c.id, name: c.name, playerClass: c.playerClass, ready: c.ready }));
+
+  const msg: ServerMessage = {
+    type: 'LOBBY_STATE',
+    players: playerList,
+    isStarted: entry.room.isStarted && !entry.room.isOver,
+    stageId: entry.room.getStageId()
+  };
+  broadcastToRoom(roomId, msg);
+}
 
 // Optional shared invite code (set PARTY_CODE env var) so a shared tunnel URL
 // doesn't let random strangers auto drop into an active crusade.
@@ -67,9 +122,11 @@ export function grantGoldToAll(amount: number): { success: boolean; amount: numb
     }
   }
 
-  // If a match is in progress, also add to teamGold in-game!
-  if (currentRoom && currentRoom.isStarted && !currentRoom.isOver) {
-    currentRoom.grantBonusGold(amount);
+  // If any match is in progress, also add to that room's teamGold in-game!
+  for (const entry of rooms.values()) {
+    if (entry.room.isStarted && !entry.room.isOver) {
+      entry.room.grantBonusGold(amount);
+    }
   }
 
   console.log(`💰 Airdropped ${amount} Gold to ${activeCount} active players! (grantId: ${grantId})`);
@@ -255,7 +312,8 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       status: 'online',
       activePlayers: clients.size,
-      isGameRunning: currentRoom ? currentRoom.isStarted && !currentRoom.isOver : false
+      activeRooms: rooms.size,
+      roomsInProgress: Array.from(rooms.values()).filter((e) => e.room.isStarted && !e.room.isOver).length
     }));
     return;
   }
@@ -273,33 +331,6 @@ server.listen(PORT, () => {
   const mode = IS_PRODUCTION ? 'production' : 'development';
   console.log(`🗡️ [Torment of Souls] Dedicated Game Server running on port ${PORT} (${mode} mode)`);
 });
-
-function broadcastLobbyState() {
-  const playerList = Array.from(clients.values())
-    .filter((c) => c.verified)
-    .map((c) => ({
-      id: c.id,
-      name: c.name,
-      playerClass: c.playerClass,
-      ready: c.ready
-    }));
-
-  const isStarted = currentRoom ? currentRoom.isStarted && !currentRoom.isOver : false;
-  const stageId = currentRoom ? currentRoom.getStageId() : 1;
-  const msg: ServerMessage = {
-    type: 'LOBBY_STATE',
-    players: playerList,
-    isStarted,
-    stageId
-  };
-
-  const payload = JSON.stringify(msg);
-  for (const client of clients.values()) {
-    if (client.ws.readyState === WebSocket.OPEN) {
-      client.ws.send(payload);
-    }
-  }
-}
 
 function sendToClient(id: string, msg: ServerMessage) {
   // GameRoom addresses players by deviceId; a couple of call sites here still use the
@@ -340,8 +371,6 @@ wss.on('connection', (ws: WebSocket) => {
   clients.set(clientId, client);
   console.log(`👤 Player connected: ${clientId} (Total active: ${clients.size})`);
 
-  broadcastLobbyState();
-
   ws.on('message', (raw: string) => {
     try {
       const msg: ClientMessage = JSON.parse(raw.toString());
@@ -359,24 +388,104 @@ wss.on('connection', (ws: WebSocket) => {
           client.unlockedSkills = msg.unlockedSkills;
           client.treePassives = msg.treePassives;
 
-          // Resuming an in-progress match after a refresh/dropped connection — jump
-          // straight back into the same character instead of waiting at the lobby.
-          if (currentRoom && currentRoom.isStarted && !currentRoom.isOver && currentRoom.hasPlayer(client.deviceId)) {
-            currentRoom.reconnectPlayer(client.deviceId);
-            client.roomId = currentRoom.id;
-            console.log(`🔌 Player ${client.deviceId} (${client.name}) reconnected to Stage ${currentRoom.getStageId()}`);
-            sendToClient(client.id, { type: 'GAME_START', yourId: client.deviceId, stageId: currentRoom.getStageId(), props: currentRoom.getProps() });
-            broadcastLobbyState();
-            break;
+          // Resuming an in-progress match after a refresh/dropped connection — search every
+          // room (not just "the" room, now that there can be several) for this deviceId.
+          let resumed = false;
+          for (const [roomId, entry] of rooms.entries()) {
+            if (entry.room.isStarted && !entry.room.isOver && entry.room.hasPlayer(client.deviceId)) {
+              entry.room.reconnectPlayer(client.deviceId);
+              client.roomId = roomId;
+              console.log(`🔌 Player ${client.deviceId} (${client.name}) reconnected to Stage ${entry.room.getStageId()}`);
+              sendToClient(client.id, { type: 'GAME_START', yourId: client.deviceId, stageId: entry.room.getStageId(), props: entry.room.getProps() });
+              broadcastRoomState(roomId);
+              resumed = true;
+              break;
+            }
           }
+          if (resumed) break;
 
-          broadcastLobbyState();
+          // Already in a (not-yet-started) room — e.g. changing hero class mid-lobby.
+          if (client.roomId) {
+            broadcastRoomState(client.roomId);
+          }
           break;
         }
 
         case 'READY_UP': {
           client.ready = msg.ready;
-          broadcastLobbyState();
+          if (client.roomId) broadcastRoomState(client.roomId);
+          break;
+        }
+
+        case 'CREATE_ROOM': {
+          if (!client.verified) {
+            sendToClient(client.id, { type: 'JOIN_REJECTED', reason: 'Invalid or missing party code.' });
+            break;
+          }
+          if (client.roomId) break; // already in a room — leave it first
+
+          const roomId = `room_${nextRoomId++}`;
+          const roomName = (msg.roomName || '').trim() || `${client.name}'s Room`;
+          const room = new GameRoom(
+            roomId,
+            sendToClient,
+            () => {
+              rooms.delete(roomId);
+              broadcastRoomList();
+            },
+            (m) => broadcastToRoom(roomId, m)
+          );
+          rooms.set(roomId, { room, name: roomName, hostClientId: client.id });
+          room.addPlayer(client.deviceId, client.name, client.playerClass, client.unlockedSkills, client.treePassives);
+          client.roomId = roomId;
+          console.log(`🏠 Room created: ${roomName} (${roomId}) by ${client.name}`);
+          broadcastRoomState(roomId);
+          broadcastRoomList();
+          break;
+        }
+
+        case 'LIST_ROOMS': {
+          sendToClient(client.id, { type: 'ROOM_LIST', rooms: roomSummaries() });
+          break;
+        }
+
+        case 'JOIN_ROOM': {
+          if (!client.verified) {
+            sendToClient(client.id, { type: 'JOIN_REJECTED', reason: 'Invalid or missing party code.' });
+            break;
+          }
+          const entry = rooms.get(msg.roomId);
+          if (!entry) {
+            sendToClient(client.id, { type: 'JOIN_REJECTED', reason: 'Room not found — it may have just closed.' });
+            break;
+          }
+          if (entry.room.getPlayerCount() >= MAX_PLAYERS_PER_ROOM) {
+            sendToClient(client.id, { type: 'JOIN_REJECTED', reason: 'Room is full.' });
+            break;
+          }
+
+          entry.room.addPlayer(client.deviceId, client.name, client.playerClass, client.unlockedSkills, client.treePassives);
+          client.roomId = entry.room.id;
+
+          // Dropping into a match already in progress vs. joining a waiting room's lobby.
+          if (entry.room.isStarted && !entry.room.isOver) {
+            console.log(`🚀 Player ${client.deviceId} (${client.name}) dropping into active Stage ${entry.room.getStageId()} in room ${entry.room.id}`);
+            sendToClient(client.id, { type: 'GAME_START', yourId: client.deviceId, stageId: entry.room.getStageId(), props: entry.room.getProps() });
+          }
+          broadcastRoomState(entry.room.id);
+          broadcastRoomList();
+          break;
+        }
+
+        case 'LEAVE_ROOM': {
+          const entry = getClientRoom(client);
+          if (!entry) break;
+          const roomId = entry.room.id;
+          client.roomId = null;
+          client.ready = false;
+          entry.room.removePlayer(client.deviceId); // may trigger the room's onEmpty cleanup above
+          if (rooms.has(roomId)) broadcastRoomState(roomId);
+          broadcastRoomList();
           break;
         }
 
@@ -385,81 +494,70 @@ wss.on('connection', (ws: WebSocket) => {
             sendToClient(client.id, { type: 'JOIN_REJECTED', reason: 'Invalid or missing party code.' });
             break;
           }
-
-          // If a crusade is already active, allow drop-in joining! (A reconnect of an
-          // existing player is already handled in JOIN_LOBBY above, so this is always
-          // a genuinely new character.)
-          if (currentRoom && currentRoom.isStarted && !currentRoom.isOver) {
-            console.log(`🚀 Player ${client.deviceId} (${client.name}) dropping into active Stage ${currentRoom.getStageId()}!`);
-            currentRoom.addPlayer(client.deviceId, client.name, client.playerClass, client.unlockedSkills, client.treePassives);
-            client.roomId = currentRoom.id;
-            sendToClient(client.id, { type: 'GAME_START', yourId: client.deviceId, stageId: currentRoom.getStageId(), props: currentRoom.getProps() });
-            broadcastLobbyState();
+          const entry = getClientRoom(client);
+          if (!entry) {
+            sendToClient(client.id, { type: 'JOIN_REJECTED', reason: 'You are not in a room.' });
             break;
           }
 
-          // Cleanly stop and reset any previous room
-          if (currentRoom) {
-            currentRoom.stop();
-            currentRoom = null;
+          // Already running — a genuinely new character dropping in (a reconnect is already
+          // handled in JOIN_LOBBY above), safety net in case START_GAME fires twice.
+          if (entry.room.isStarted && !entry.room.isOver) {
+            sendToClient(client.id, { type: 'GAME_START', yourId: client.deviceId, stageId: entry.room.getStageId(), props: entry.room.getProps() });
+            break;
           }
 
-          const verifiedClients = Array.from(clients.values()).filter((c) => c.verified);
-          currentRoom = new GameRoom(
-            'main_room',
-            sendToClient,
-            () => { currentRoom = null; },
-            (msg) => broadcastToRoom('main_room', msg)
-          );
-          for (const c of verifiedClients) {
-            currentRoom.addPlayer(c.deviceId, c.name, c.playerClass, c.unlockedSkills, c.treePassives);
-            c.roomId = currentRoom.id;
-          }
-          currentRoom.start(msg.stageId || 1);
-          console.log(`⚔️ Game crusade launched in Stage ${msg.stageId || 1} with ${verifiedClients.length} players!`);
-
-          broadcastLobbyState();
+          entry.room.start(msg.stageId || 1);
+          console.log(`⚔️ Game crusade launched in room ${entry.room.id} (Stage ${msg.stageId || 1}, ${entry.room.getPlayerCount()} players)`);
+          broadcastRoomState(entry.room.id);
+          broadcastRoomList();
           break;
         }
 
         case 'INPUT': {
-          if (currentRoom && currentRoom.isStarted && !currentRoom.isOver) {
-            currentRoom.handleInput(client.deviceId, msg.moveX, msg.moveY, msg.aimAngle, msg.isAttacking);
+          const entry = getClientRoom(client);
+          if (entry && entry.room.isStarted && !entry.room.isOver) {
+            entry.room.handleInput(client.deviceId, msg.moveX, msg.moveY, msg.aimAngle, msg.isAttacking);
           }
           break;
         }
 
         case 'DASH': {
-          if (currentRoom && currentRoom.isStarted && !currentRoom.isOver) {
-            currentRoom.handleDash(client.deviceId, msg.aimAngle);
+          const entry = getClientRoom(client);
+          if (entry && entry.room.isStarted && !entry.room.isOver) {
+            entry.room.handleDash(client.deviceId, msg.aimAngle);
           }
           break;
         }
 
         case 'SELECT_TRAIT': {
-          if (currentRoom && currentRoom.isStarted) {
-            currentRoom.handleSelectTrait(client.deviceId, msg.traitId);
+          const entry = getClientRoom(client);
+          if (entry && entry.room.isStarted) {
+            entry.room.handleSelectTrait(client.deviceId, msg.traitId);
           }
           break;
         }
 
         case 'USE_POTION': {
-          if (currentRoom && currentRoom.isStarted) {
-            currentRoom.handleUsePotion(client.deviceId, msg.action, msg.traitId);
+          const entry = getClientRoom(client);
+          if (entry && entry.room.isStarted) {
+            entry.room.handleUsePotion(client.deviceId, msg.action, msg.traitId);
           }
           break;
         }
 
         case 'SURRENDER': {
-          if (currentRoom && currentRoom.isStarted) {
-            currentRoom.handleSurrender(client.deviceId);
+          const entry = getClientRoom(client);
+          if (entry && entry.room.isStarted) {
+            entry.room.handleSurrender(client.deviceId);
           }
           break;
         }
 
         case 'PAUSE_GAME': {
-          if (currentRoom && currentRoom.isStarted) {
-            currentRoom.handlePauseGame(client.deviceId, msg.isPaused);
+          const entry = getClientRoom(client);
+          if (entry && entry.room.isStarted) {
+            entry.room.handlePauseGame(client.deviceId, msg.isPaused);
           }
           break;
         }
@@ -471,17 +569,20 @@ wss.on('connection', (ws: WebSocket) => {
 
   ws.on('close', () => {
     console.log(`🚪 Player disconnected: ${clientId}`);
-    if (currentRoom && currentRoom.hasPlayer(client.deviceId)) {
-      if (currentRoom.isStarted && !currentRoom.isOver) {
+    const entry = getClientRoom(client);
+    if (entry) {
+      const roomId = entry.room.id;
+      if (entry.room.isStarted && !entry.room.isOver) {
         // Mid-match: keep their character alive for a grace period in case this was
         // just a refresh or a flaky connection, rather than deleting their progress.
         console.log(`⏳ Player ${client.deviceId} disconnected mid-match — grace period started`);
-        currentRoom.disconnectPlayer(client.deviceId);
+        entry.room.disconnectPlayer(client.deviceId);
       } else {
-        currentRoom.removePlayer(client.deviceId);
+        entry.room.removePlayer(client.deviceId); // may trigger the room's onEmpty cleanup above
       }
+      if (rooms.has(roomId)) broadcastRoomState(roomId);
     }
     clients.delete(clientId);
-    broadcastLobbyState();
+    broadcastRoomList();
   });
 });

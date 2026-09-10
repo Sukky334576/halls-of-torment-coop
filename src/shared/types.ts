@@ -380,7 +380,22 @@ export type ClientMessage =
   | { type: 'USE_POTION'; action: 'REROLL' | 'BANISH' | 'LOCK'; traitId?: string }
   | { type: 'SEND_WELL_GEAR'; gearId: string }
   | { type: 'SURRENDER' }
-  | { type: 'PAUSE_GAME'; isPaused: boolean };
+  | { type: 'PAUSE_GAME'; isPaused: boolean }
+  | { type: 'CREATE_ROOM'; roomName?: string }
+  | { type: 'LIST_ROOMS' }
+  | { type: 'JOIN_ROOM'; roomId: string }
+  | { type: 'LEAVE_ROOM' };
+
+/** One entry in the public room browser (see server.ts's room list) — everyone who's
+ * logged in and not currently in a room sees this list and can join any of them directly. */
+export interface RoomSummary {
+  id: string;
+  name: string;
+  hostName: string;
+  playerCount: number;
+  maxPlayers: number;
+  isStarted: boolean;
+}
 
 export type ServerMessage =
   | { type: 'JOIN_REJECTED'; reason: string }
@@ -415,5 +430,6 @@ export type ServerMessage =
       lockedTraitId?: string | null;
     }
   | { type: 'WELL_GEAR_RETRIEVED'; gearName: string; retrievedBy: string }
+  | { type: 'ROOM_LIST'; rooms: RoomSummary[] }
   | { type: 'GRANT_GOLD'; amount: number; message: string; thaiMessage: string; grantId?: string }
   | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number; reason?: 'BOSS_ENRAGE_EXECUTE' };

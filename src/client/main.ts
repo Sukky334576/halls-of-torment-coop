@@ -15,6 +15,7 @@ import { I18n } from './engine/I18n';
 import { AuthClient } from './engine/AuthClient';
 import { AuthGateUI } from './ui/AuthGateUI';
 import { MainMenuUI, GameMode } from './ui/MainMenuUI';
+import { RoomBrowserUI } from './ui/RoomBrowserUI';
 
 const DEVICE_ID_KEY = 'torment_device_id';
 
@@ -56,6 +57,9 @@ class GameApp {
   public lobby: LobbyUI;
   public traits: TraitSelector;
   public escMenu: EscMenuUI;
+  private mode: GameMode;
+  private roomBrowser: RoomBrowserUI | null = null;
+  private appEl: HTMLElement;
 
   // Input states
   private keys: Record<string, boolean> = {};
@@ -81,28 +85,29 @@ class GameApp {
 
   constructor(mode: GameMode = 'multiplayer') {
     (window as any).game = this;
-    const appEl = document.getElementById('app')!;
+    this.mode = mode;
+    this.appEl = document.getElementById('app')!;
 
     // Create isolated containers so subsystems never overwrite each other
     const gameContainer = document.createElement('div');
     gameContainer.id = 'game-container';
-    appEl.appendChild(gameContainer);
+    this.appEl.appendChild(gameContainer);
 
     const hudContainer = document.createElement('div');
     hudContainer.id = 'hud-container';
-    appEl.appendChild(hudContainer);
+    this.appEl.appendChild(hudContainer);
 
     const traitContainer = document.createElement('div');
     traitContainer.id = 'trait-container';
-    appEl.appendChild(traitContainer);
+    this.appEl.appendChild(traitContainer);
 
     const lobbyContainer = document.createElement('div');
     lobbyContainer.id = 'lobby-container';
-    appEl.appendChild(lobbyContainer);
+    this.appEl.appendChild(lobbyContainer);
 
     const escContainer = document.createElement('div');
     escContainer.id = 'esc-container';
-    appEl.appendChild(escContainer);
+    this.appEl.appendChild(escContainer);
 
     // 1. Initialize 2.5D Engine Subsystems
     this.renderer = new Renderer2D(gameContainer);
@@ -173,7 +178,8 @@ class GameApp {
         this.send({ type: 'START_GAME', stageId });
       },
       this.sound,
-      mode
+      mode,
+      () => this.leaveRoom()
     );
 
     // Listen to custom player nickname change
@@ -201,6 +207,24 @@ class GameApp {
 
     // 4. Start 2.5D Render Loop
     this.loop();
+  }
+
+  private showRoomBrowser(): void {
+    this.appEl.style.display = 'none';
+    this.roomBrowser = new RoomBrowserUI(
+      document.body,
+      (name) => this.send({ type: 'CREATE_ROOM', roomName: name || undefined }),
+      (roomId) => this.send({ type: 'JOIN_ROOM', roomId })
+    );
+    this.send({ type: 'LIST_ROOMS' });
+  }
+
+  /** Sends the player back to the room browser — only meaningful in multiplayer; solo's
+   * silently-created room has no browser to return to. */
+  public leaveRoom(): void {
+    this.send({ type: 'LEAVE_ROOM' });
+    this.lobby.hide();
+    this.showRoomBrowser();
   }
 
   public performDash(): void {
@@ -376,6 +400,14 @@ class GameApp {
         partyCode: this.partyCode,
         deviceId: this.deviceId
       });
+
+      // No offline mode (see MainMenuUI) — both paths use the same server, just differ in
+      // how a room is picked. Solo never needs the browser at all: create one silently.
+      if (this.mode === 'solo') {
+        this.send({ type: 'CREATE_ROOM' });
+      } else {
+        this.showRoomBrowser();
+      }
     };
 
     this.ws.onmessage = (event) => {
@@ -388,7 +420,19 @@ class GameApp {
             break;
           }
 
+          case 'ROOM_LIST': {
+            this.roomBrowser?.updateRooms(msg.rooms);
+            break;
+          }
+
           case 'LOBBY_STATE': {
+            // First LOBBY_STATE after CREATE_ROOM/JOIN_ROOM means we're actually in a room
+            // now — dismiss the browser (if any, i.e. multiplayer) and reveal the game.
+            if (this.roomBrowser) {
+              this.roomBrowser.destroy();
+              this.roomBrowser = null;
+              this.appEl.style.display = '';
+            }
             this.lobby.updateParty(msg.players, msg.isStarted, msg.stageId);
             break;
           }
@@ -742,7 +786,10 @@ window.addEventListener('DOMContentLoaded', () => {
   function showMainMenu(): void {
     const menu = new MainMenuUI(document.body, (mode) => {
       menu.destroy();
-      appEl.style.display = '';
+      // Solo auto-creates its own room the instant it connects (see GameApp.setupNetwork),
+      // so #app can show right away. Multiplayer stays hidden behind the room browser until
+      // a room is actually joined — GameApp reveals it itself once that happens.
+      if (mode === 'solo') appEl.style.display = '';
       (window as any).gameApp = new GameApp(mode);
     });
   }

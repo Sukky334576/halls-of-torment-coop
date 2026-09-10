@@ -224,6 +224,7 @@
 
     .btn-lang-toggle,
     .btn-account,
+    .btn-leave-room,
     .btn-gear-vault,
     .btn-trials-btn,
     .btn-skill-tree {
@@ -250,6 +251,7 @@
 
     .btn-lang-toggle:hover,
     .btn-account:hover,
+    .btn-leave-room:hover,
     .btn-gear-vault:hover,
     .btn-trials-btn:hover,
     .btn-skill-tree:hover {
@@ -4111,6 +4113,102 @@
 
     .main-menu-logout:hover {
       color: #94a3b8;
+    }
+
+    /* --- Room browser (multiplayer: create/join a room) --- */
+    .room-browser-panel {
+      max-width: 460px;
+      max-height: 80vh;
+    }
+
+    .room-browser-create-form {
+      width: 100%;
+      display: flex;
+      gap: 8px;
+    }
+
+    .room-browser-create-form .account-input {
+      flex: 1;
+    }
+
+    .room-browser-create-form .account-submit-btn {
+      white-space: nowrap;
+      width: auto;
+      padding: 0 16px;
+    }
+
+    .room-browser-list {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+
+    .room-browser-empty {
+      font-size: 0.82rem;
+      color: #94a3b8;
+      text-align: center;
+      margin: 8px 0;
+    }
+
+    .room-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: #0a0e17;
+      border: 1px solid #2d3b55;
+      border-radius: 8px;
+      padding: 10px 14px;
+    }
+
+    .room-row-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .room-row-name {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #e2e8f0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .room-row-meta {
+      font-size: 0.72rem;
+      color: #94a3b8;
+    }
+
+    .room-row-join-btn {
+      background: linear-gradient(135deg, #854d0e, #ca8a04);
+      border: 1px solid #f59e0b;
+      color: #fff8e1;
+      font-family: 'Prompt', sans-serif;
+      font-weight: 700;
+      font-size: 0.78rem;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+
+    .room-row-join-btn:hover:not(:disabled) {
+      filter: brightness(1.1);
+    }
+
+    .room-row-join-btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+      background: #1e293b;
+      border-color: #334155;
+      color: #64748b;
     }
 
     /* --- RARITY THEMING --- */

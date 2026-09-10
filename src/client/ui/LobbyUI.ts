@@ -42,6 +42,7 @@ export class LobbyUI {
   // GameRoom.test.ts's solo cases). This only affects presentation: solo hides the party
   // list (nothing to show) and skips the manual ready-up step (nothing to coordinate).
   private mode: 'solo' | 'multiplayer' = 'multiplayer';
+  private onLeaveRoom?: () => void;
 
   // Real-time Multiplayer Party & Lobby State
   private connectedPlayers: { id: string; name: string; playerClass: PlayerClass; ready: boolean }[] = [];
@@ -96,7 +97,8 @@ export class LobbyUI {
     onReady: (ready: boolean) => void,
     onStartGame: (stageId: number) => void,
     sound?: SoundManager,
-    mode: 'solo' | 'multiplayer' = 'multiplayer'
+    mode: 'solo' | 'multiplayer' = 'multiplayer',
+    onLeaveRoom?: () => void
   ) {
     this.container = container;
     this.onSelectClass = onSelectClass;
@@ -104,6 +106,7 @@ export class LobbyUI {
     this.onStartGame = onStartGame;
     this.sound = sound;
     this.mode = mode;
+    this.onLeaveRoom = onLeaveRoom;
 
     const savedName = typeof localStorage !== 'undefined' ? localStorage.getItem('torment_player_name') : null;
     this.playerName = savedName || `Crusader_${Math.floor(Math.random() * 900 + 100)}`;
@@ -135,9 +138,13 @@ export class LobbyUI {
     this.refreshCoins();
 
     if (this.mode === 'solo') {
-      // No one else to coordinate with — skip the manual ready-up step entirely.
+      // No one else to coordinate with — skip the manual ready-up step entirely. Only a
+      // local flag, not sent to the server: nothing server-side actually gates starting a
+      // match on `ready` (see GameRoom/server.ts's START_GAME handler), and calling the
+      // onReady callback here would fire before GameApp finishes constructing its own
+      // WebSocket (this constructor runs first) — it would throw reading `this.ws` on an
+      // object that doesn't exist yet.
       this.isReady = true;
-      this.onReady(true);
     }
 
     I18n.onLanguageChanged(() => {
@@ -163,6 +170,13 @@ export class LobbyUI {
               <button id="btn-lang-toggle" class="btn btn-lang-toggle" title="สลับภาษา / Toggle Language">
                 ${isTh ? 'ภาษาไทย' : 'English'}
               </button>
+              ${
+                this.mode === 'multiplayer'
+                  ? `<button id="btn-leave-room" class="btn btn-leave-room" title="${isTh ? 'ออกจากห้อง' : 'Leave Room'}">
+                      ${isTh ? '🚪 ออกจากห้อง' : '🚪 Leave Room'}
+                    </button>`
+                  : ''
+              }
               <button id="btn-open-account" class="btn btn-account" title="${isTh ? 'บัญชีผู้เล่น' : 'Account'}">
                 👤 ${AuthClient.isLoggedIn() ? AuthClient.getUsername() : (isTh ? 'บัญชี' : 'Account')}
               </button>
@@ -301,6 +315,10 @@ export class LobbyUI {
 
     this.container.querySelector('#btn-open-account')?.addEventListener('click', () => {
       this.accountUI.show();
+    });
+
+    this.container.querySelector('#btn-leave-room')?.addEventListener('click', () => {
+      this.onLeaveRoom?.();
     });
 
     // Nickname input handlers
