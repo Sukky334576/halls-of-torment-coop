@@ -25,6 +25,26 @@
       color: #e2e8f0;
     }
 
+    /* Appended straight to <body>, not #app — must stay visible over every other screen
+       (lobby, room browser, esc menu, active match) since a dropped connection can happen
+       during any of them. High z-index + full-width top strip keeps it clear of every other
+       overlay (the HUD's own banner stack included) without needing to know what else is
+       currently showing. */
+    #connection-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 999;
+      text-align: center;
+      padding: 8px 12px;
+      background: rgba(127, 29, 29, 0.95);
+      color: #fecaca;
+      font-size: 0.82rem;
+      font-weight: 700;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+    }
+
     #app {
       width: 100%;
       height: 100%;
@@ -970,10 +990,6 @@
     }
 
     .hud-shrine-buff {
-      position: absolute;
-      top: 66px;
-      left: 50%;
-      transform: translateX(-50%);
       display: flex;
       align-items: center;
       gap: 10px;
@@ -982,14 +998,12 @@
       border-radius: 20px;
       padding: 5px 18px;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.9), 0 0 16px rgba(255, 215, 0, 0.4);
-      z-index: 15;
       animation: shrinePulse 2s infinite ease-in-out;
-      pointer-events: none;
     }
 
     @keyframes shrinePulse {
-      0%, 100% { transform: translateX(-50%) scale(1); }
-      50% { transform: translateX(-50%) scale(1.03); }
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.03); }
     }
 
     .shrine-buff-icon {
@@ -1016,44 +1030,35 @@
       border: 1px solid rgba(255, 255, 255, 0.2);
     }
 
-    .hud-boss-banner {
+    /* Boss banner, shrine buff, and execute-deadline countdown can all be visible at once
+       (wave-30 fight) — they used to each guess their own fixed `top` pixel offset, which
+       silently assumed a specific height for whatever was stacked above it. A longer boss
+       name/label wrapping to 2 lines was enough to make the deadline countdown crowd into
+       the banner above it. `.hud-banner-stack` (wrapping all three, see HUD.ts) lays them
+       out with flexbox instead, so they space themselves based on actual rendered height.
+       `.hud-boss-banner` also used to be defined twice in this file (here and further below)
+       with different `top`/`z-index` — only the later one ever took effect; consolidated. */
+    .hud-banner-stack {
       position: absolute;
       top: 66px;
       left: 50%;
       transform: translateX(-50%);
-      text-align: center;
-      background: rgba(28, 6, 10, 0.94);
-      border: 2px solid #ef4444;
-      border-radius: 8px;
-      padding: 6px 24px;
-      box-shadow: 0 0 30px rgba(239, 68, 68, 0.6), 0 4px 16px rgba(0,0,0,0.9);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
       z-index: 15;
       pointer-events: none;
     }
 
     .boss-banner-label {
-      font-size: 0.68rem;
-      letter-spacing: 2px;
-      color: #fca5a5;
-      font-weight: 800;
-    }
-
-    .boss-banner-name {
-      font-size: 1.15rem;
-      letter-spacing: 1.5px;
-      color: #ffd166;
+      font-size: 0.78rem;
       font-weight: 900;
-      text-shadow: 0 0 12px rgba(255, 209, 102, 0.8);
+      color: #ffd166;
+      letter-spacing: 2px;
     }
 
-    /* Final-boss execute deadline countdown — sits below the boss banner (both can be
-       visible at once during the wave-30 fight) and pulses to keep it urgent-feeling
-       without being so aggressive it becomes unreadable. */
     .hud-deadline-banner {
-      position: absolute;
-      top: 118px;
-      left: 50%;
-      transform: translateX(-50%);
       flex-direction: column;
       align-items: center;
       gap: 2px;
@@ -1063,8 +1068,6 @@
       border-radius: 8px;
       padding: 5px 20px;
       box-shadow: 0 0 24px rgba(153, 27, 27, 0.7), 0 4px 14px rgba(0,0,0,0.9);
-      z-index: 15;
-      pointer-events: none;
       animation: deadlinePulse 1.4s ease-in-out infinite;
     }
 
@@ -2816,28 +2819,17 @@
       font-weight: 800;
     }
     .hud-boss-banner {
-      position: absolute;
-      top: 65px;
-      left: 50%;
-      transform: translateX(-50%);
       background: linear-gradient(135deg, rgba(127, 29, 29, 0.95) 0%, rgba(69, 10, 10, 0.95) 100%);
       border: 2px solid #ef4444;
       box-shadow: 0 0 30px rgba(239, 68, 68, 0.6);
       border-radius: 8px;
       padding: 10px 28px;
       text-align: center;
-      z-index: 50;
       animation: boss-banner-pulse 1.5s infinite alternate;
     }
     @keyframes boss-banner-pulse {
-      0% { transform: translateX(-50%) scale(0.98); box-shadow: 0 0 15px rgba(239, 68, 68, 0.5); }
-      100% { transform: translateX(-50%) scale(1.02); box-shadow: 0 0 35px rgba(239, 68, 68, 0.9); }
-    }
-    .boss-banner-label {
-      font-size: 0.78rem;
-      font-weight: 900;
-      color: #ffd166;
-      letter-spacing: 2px;
+      0% { transform: scale(0.98); box-shadow: 0 0 15px rgba(239, 68, 68, 0.5); }
+      100% { transform: scale(1.02); box-shadow: 0 0 35px rgba(239, 68, 68, 0.9); }
     }
     .boss-banner-name {
       font-size: 1.35rem;

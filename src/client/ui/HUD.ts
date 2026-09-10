@@ -56,23 +56,28 @@ export class HUD {
         </div>
       </div>
 
-      <!-- Active Shrine Buff Banner -->
-      <div id="hud-shrine-buff" class="hud-shrine-buff" style="display: none;">
-        <span id="shrine-buff-icon" class="shrine-buff-icon">⚡</span>
-        <span id="shrine-buff-name" class="shrine-buff-name">SHRINE OF SPEED</span>
-        <span id="shrine-buff-timer" class="shrine-buff-timer">10.0s</span>
-      </div>
+      <!-- Wraps the three banners below in a flex column so they space themselves based on
+           actual rendered height instead of each guessing its own fixed top-offset (that's
+           what let a long boss name push the deadline countdown into overlapping it). -->
+      <div class="hud-banner-stack">
+        <!-- Active Shrine Buff Banner -->
+        <div id="hud-shrine-buff" class="hud-shrine-buff" style="display: none;">
+          <span id="shrine-buff-icon" class="shrine-buff-icon">⚡</span>
+          <span id="shrine-buff-name" class="shrine-buff-name">SHRINE OF SPEED</span>
+          <span id="shrine-buff-timer" class="shrine-buff-timer">10.0s</span>
+        </div>
 
-      <!-- Boss Announcement Banner -->
-      <div id="hud-boss-banner" class="hud-boss-banner" style="display: none;">
-        <div class="boss-banner-label" id="hud-boss-banner-label">${I18n.t('hud.boss_encounter')}</div>
-        <div id="hud-boss-name" class="boss-banner-name">ELITE GOLEM OF TORMENT</div>
-      </div>
+        <!-- Boss Announcement Banner -->
+        <div id="hud-boss-banner" class="hud-boss-banner" style="display: none;">
+          <div class="boss-banner-label" id="hud-boss-banner-label">${I18n.t('hud.boss_encounter')}</div>
+          <div id="hud-boss-name" class="boss-banner-name">ELITE GOLEM OF TORMENT</div>
+        </div>
 
-      <!-- Boss Execute Deadline Countdown (only visible once the grace period has passed) -->
-      <div id="hud-deadline-banner" class="hud-deadline-banner" style="display: none;">
-        <div class="deadline-banner-label">${I18n.t('hud.deadline_warning')}</div>
-        <div id="hud-deadline-timer" class="deadline-banner-timer">5:00</div>
+        <!-- Boss Execute Deadline Countdown (only visible once the grace period has passed) -->
+        <div id="hud-deadline-banner" class="hud-deadline-banner" style="display: none;">
+          <div class="deadline-banner-label">${I18n.t('hud.deadline_warning')}</div>
+          <div id="hud-deadline-timer" class="deadline-banner-timer">5:00</div>
+        </div>
       </div>
 
       <!-- Full-screen red vignette that intensifies as the execute deadline approaches -->
