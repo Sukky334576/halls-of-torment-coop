@@ -216,7 +216,12 @@ export class GameRoom {
     this.stageId = stageId;
     this.hordeDirector.setStage(stageId);
     this.isStarted = true;
-    this.teamGold = 35000; // Initial 35,000 gold gift for current players!
+    // Was a 35,000 testing-phase starting gift — teamGold gets converted 1:1 into every
+    // player's real, permanent coins at GAME_OVER (see broadcastGameOver's personalGold +
+    // teamGold/playerCount split), so this silently handed out 35k free gold on every single
+    // match completion. teamGold now only grows through genuine sources: grantBonusGold()
+    // (the /api/grant-gold GM command, kept intentionally — see testing_phase_known_risks).
+    this.teamGold = 0;
     this.props = generateStageProps(stageId);
     for (const [id] of this.players) {
       this.sendCallback(id, { type: 'GAME_START', yourId: id, stageId, props: this.props });
