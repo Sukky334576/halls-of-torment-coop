@@ -575,6 +575,10 @@ export class GameRoom {
       this.resolvePropCollision(monster, monster.radius);
       this.monsterGrid.insert(monster);
 
+      if (monster.isBoss) {
+        this.updateBossAbilities(monster, dt, alivePlayers);
+      }
+
       if (shouldShoot) {
         const angle = Math.atan2(targetY - monster.y, targetX - monster.x);
         let projType = ProjectileType.ENEMY_ARROW;
@@ -2126,6 +2130,113 @@ export class GameRoom {
         for (const m of sanctumMobs) {
           this.damageMonster(m, p.damage, false, 'HOLY');
         }
+      }
+    }
+  }
+
+  // Bosses previously had zero special attacks — they fell through to ServerMonster.update()'s
+  // "Default Melee Chaser" branch, identical AI to a basic skeleton, just tankier. Each boss
+  // type gets its own moveset here, layered on top of that same chase-and-contact-damage base
+  // rather than replacing it, so a boss is still always a threat even between ability casts.
+  private updateBossAbilities(monster: ServerMonster, dt: number, alivePlayers: ServerPlayer[]): void {
+    monster.bossAbilityTimer += dt;
+    monster.bossSummonTimer += dt;
+
+    if (monster.type === MonsterType.ELITE_GOLEM) {
+      // Ground Slam: a telegraph-free but fair AOE (7s cooldown is long enough to react to
+      // the visual/audio cue once it lands) — punishes standing still in melee range.
+      const SLAM_COOLDOWN = 7;
+      const SLAM_RADIUS = 180;
+      if (monster.bossAbilityTimer >= SLAM_COOLDOWN) {
+        const inRange = alivePlayers.some((p) => Math.hypot(p.x - monster.x, p.y - monster.y) <= 260);
+        if (inRange) {
+          monster.bossAbilityTimer = 0;
+          for (const p of alivePlayers) {
+            if (Math.hypot(p.x - monster.x, p.y - monster.y) <= SLAM_RADIUS) {
+              p.takeDamage(monster.damage * 2.5);
+            }
+          }
+          // Reuses the Cat Tank ultimate's shockwave visual — same "stone/earth impact" read,
+          // no new client rendering needed. damage: 0 since it's purely cosmetic here; the
+          // actual hits above are resolved directly against alivePlayers.
+          this.projectiles.push({
+            id: ++this.nextProjId,
+            type: ProjectileType.TITAN_QUAKE_WAVE,
+            x: monster.x,
+            y: monster.y,
+            vx: 0,
+            vy: 0,
+            damage: 0,
+            isCrit: true,
+            radius: SLAM_RADIUS,
+            lifeTime: 0.45,
+            pierceRemaining: 1,
+            hitEntityIds: new Set()
+          });
+          this.broadcastDamageNumber(monster.x, monster.y - 30, 0, false, '💥 GROUND SLAM!', '#a8a29e');
+        }
+      }
+    } else if (monster.type === MonsterType.LORD_OF_TORMENT) {
+      // Void Barrage: a 5-projectile fan aimed at the nearest player — the only ranged threat
+      // in the fight otherwise, since this boss is a melee chaser like every other type.
+      const BARRAGE_COOLDOWN = 6;
+      const BARRAGE_RANGE = 550;
+      let nearest: ServerPlayer | null = null;
+      let nearestDist = Infinity;
+      for (const p of alivePlayers) {
+        const d = Math.hypot(p.x - monster.x, p.y - monster.y);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearest = p;
+        }
+      }
+      if (monster.bossAbilityTimer >= BARRAGE_COOLDOWN && nearest && nearestDist <= BARRAGE_RANGE) {
+        monster.bossAbilityTimer = 0;
+        const baseAngle = Math.atan2(nearest.y - monster.y, nearest.x - monster.x);
+        const spreadOffsets = [-0.5, -0.25, 0, 0.25, 0.5];
+        for (const offset of spreadOffsets) {
+          const angle = baseAngle + offset;
+          this.projectiles.push({
+            id: ++this.nextProjId,
+            type: ProjectileType.ENEMY_VOID_ORB,
+            x: monster.x,
+            y: monster.y,
+            vx: Math.cos(angle) * 150,
+            vy: Math.sin(angle) * 150,
+            damage: Math.round(monster.damage * 0.8),
+            isCrit: false,
+            radius: 8,
+            lifeTime: 2.2,
+            pierceRemaining: 1,
+            hitEntityIds: new Set()
+          });
+        }
+        this.broadcastDamageNumber(monster.x, monster.y - 30, 0, false, '🌑 VOID BARRAGE!', '#a855f7');
+      }
+
+      // Summon Reinforcements: periodically calls in hellhounds so the fight isn't purely
+      // 1-on-1 — pressures players who kited to a safe distance from the boss itself.
+      const SUMMON_COOLDOWN = 15;
+      const SUMMON_COUNT = 2;
+      if (monster.bossSummonTimer >= SUMMON_COOLDOWN) {
+        monster.bossSummonTimer = 0;
+        for (let i = 0; i < SUMMON_COUNT; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const dist = 100 + Math.random() * 60;
+          const summon = new ServerMonster(
+            this.hordeDirector.getNextEntityId(),
+            MonsterType.HELLHOUND,
+            monster.x + Math.cos(angle) * dist,
+            monster.y + Math.sin(angle) * dist,
+            1.0,
+            1.0,
+            1.0,
+            false
+          );
+          this.monsters.set(summon.id, summon);
+          this.monsterGrid.insert(summon);
+        }
+        this.broadcastDamageNumber(monster.x, monster.y - 50, 0, false, '💀 REINFORCEMENTS!', '#dc2626');
       }
     }
   }

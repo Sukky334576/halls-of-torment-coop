@@ -26,6 +26,12 @@ export class ServerMonster implements GridEntity {
   public isBoss: boolean = false;
   public bossName?: string;
   public attackTimer: number = Math.random() * 1.5; // Stagger initial attacks
+  // Bosses used to have no attacks beyond the default melee chaser's contact damage — same AI
+  // as a basic skeleton, just tankier. These two generic timers back whatever special moves
+  // GameRoom.updateBossAbilities() gives each boss type (ground slam / void barrage / summon).
+  // Staggered starts so a boss doesn't fire every ability in its first second alive.
+  public bossAbilityTimer: number = Math.random() * 3;
+  public bossSummonTimer: number = Math.random() * 6;
   public statusEffects: Map<ElementStatus, MonsterStatusEffect> = new Map();
   public defenseDebuff: number = 0; // e.g. 0.50 from Superconduct
 
