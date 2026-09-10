@@ -231,6 +231,13 @@ function requireAuth(req: http.IncomingMessage, res: http.ServerResponse): numbe
 }
 
 async function handleRegister(req: http.IncomingMessage, res: http.ServerResponse) {
+  // Namespaced key so this doesn't share a bucket with /api/login's throttle on the same IP —
+  // a burst of failed logins shouldn't also block someone from registering, or vice versa.
+  const ip = `register:${getClientIp(req)}`;
+  if (isRateLimited(ip)) {
+    return sendJson(res, 429, { success: false, error: 'Too many registration attempts — try again in a minute' });
+  }
+
   let body: { username?: string; password?: string };
   try {
     body = await readJsonBody(req);
