@@ -571,8 +571,8 @@ class GameApp {
           case 'GAME_OVER': {
             this.isGameRunning = false;
             this.escMenu.hide();
+            this.traits.hide(); // also clears the trait-modal-open body class
             document.body.classList.remove('in-game');
-            document.body.classList.remove('trait-modal-open');
             // personalGold is what this player actually picked up themselves this run;
             // teamGold/playerCount is the leftover shared/bonus bucket (airdrops, starting gift), split evenly.
             const sharedShare = Math.floor(msg.teamGold / Math.max(1, msg.playerCount));

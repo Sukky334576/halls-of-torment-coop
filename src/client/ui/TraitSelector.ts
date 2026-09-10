@@ -59,6 +59,21 @@ export class TraitSelector {
     this.render();
   }
 
+  /** Force-closes an open (or queued) trait pick — needed for GAME_OVER/SURRENDER while a
+   * level-up choice happens to be on screen. Without this, the modal's own inline
+   * `display: flex` (set in render()) just stays put — the match-end handler previously only
+   * cleared the `trait-modal-open` body class, which doesn't touch the modal element itself —
+   * so the defeat/victory screen underneath was rendered but never actually visible. Also
+   * drops any still-queued choices so they can't reappear at the start of the next match. */
+  public hide(): void {
+    const modal = this.container.querySelector('#trait-modal') as HTMLElement | null;
+    if (modal) modal.style.display = 'none';
+    this.isShowing = false;
+    this.pendingQueue = [];
+    this.activeMode = 'NONE';
+    document.body.classList.remove('trait-modal-open');
+  }
+
   public updatePotions(potions: PotionState): void {
     this.currentPotions = potions;
     if (this.isShowing) {
