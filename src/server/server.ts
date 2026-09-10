@@ -44,6 +44,11 @@ interface RoomEntry {
   room: GameRoom;
   name: string;
   hostClientId: string;
+  hostName: string;
+  // Plain in-memory string, never persisted or sent back to clients (see RoomSummary's
+  // hasPassword) — a lightweight room passcode shared verbally/by chat between friends,
+  // not an account credential, so this doesn't warrant hashing like login passwords do.
+  password: string | null;
 }
 const MAX_PLAYERS_PER_ROOM = 4;
 const rooms: Map<string, RoomEntry> = new Map();
@@ -57,7 +62,8 @@ function roomSummaries(): RoomSummary[] {
   return Array.from(rooms.entries()).map(([id, entry]) => ({
     id,
     name: entry.name,
-    hostName: entry.name,
+    hostName: entry.hostName,
+    hasPassword: !!entry.password,
     playerCount: entry.room.getPlayerCount(),
     maxPlayers: MAX_PLAYERS_PER_ROOM,
     isStarted: entry.room.isStarted && !entry.room.isOver
@@ -424,8 +430,10 @@ wss.on('connection', (ws: WebSocket) => {
           }
           if (client.roomId) break; // already in a room — leave it first
 
-          const roomId = `room_${nextRoomId++}`;
-          const roomName = (msg.roomName || '').trim() || `${client.name}'s Room`;
+          const roomNumber = nextRoomId++;
+          const roomId = `room_${roomNumber}`;
+          const roomName = (msg.roomName || '').trim() || `Room #${roomNumber}`;
+          const password = (msg.password || '').trim() || null;
           const room = new GameRoom(
             roomId,
             sendToClient,
@@ -435,10 +443,10 @@ wss.on('connection', (ws: WebSocket) => {
             },
             (m) => broadcastToRoom(roomId, m)
           );
-          rooms.set(roomId, { room, name: roomName, hostClientId: client.id });
+          rooms.set(roomId, { room, name: roomName, hostClientId: client.id, hostName: client.name, password });
           room.addPlayer(client.deviceId, client.name, client.playerClass, client.unlockedSkills, client.treePassives);
           client.roomId = roomId;
-          console.log(`🏠 Room created: ${roomName} (${roomId}) by ${client.name}`);
+          console.log(`🏠 Room created: ${roomName} (${roomId}) by ${client.name}${password ? ' [locked]' : ''}`);
           broadcastRoomState(roomId);
           broadcastRoomList();
           break;
@@ -461,6 +469,10 @@ wss.on('connection', (ws: WebSocket) => {
           }
           if (entry.room.getPlayerCount() >= MAX_PLAYERS_PER_ROOM) {
             sendToClient(client.id, { type: 'JOIN_REJECTED', reason: 'Room is full.' });
+            break;
+          }
+          if (entry.password && entry.password !== (msg.password || '')) {
+            sendToClient(client.id, { type: 'JOIN_REJECTED', reason: 'Incorrect room password.' });
             break;
           }
 

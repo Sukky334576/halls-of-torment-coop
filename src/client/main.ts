@@ -213,8 +213,8 @@ class GameApp {
     this.appEl.style.display = 'none';
     this.roomBrowser = new RoomBrowserUI(
       document.body,
-      (name) => this.send({ type: 'CREATE_ROOM', roomName: name || undefined }),
-      (roomId) => this.send({ type: 'JOIN_ROOM', roomId })
+      (name, password) => this.send({ type: 'CREATE_ROOM', roomName: name || undefined, password: password || undefined }),
+      (roomId, password) => this.send({ type: 'JOIN_ROOM', roomId, password: password || undefined })
     );
     this.send({ type: 'LIST_ROOMS' });
   }
@@ -416,7 +416,11 @@ class GameApp {
 
         switch (msg.type) {
           case 'JOIN_REJECTED': {
-            this.lobby.showToast(`🔒 ${msg.reason}`);
+            if (this.roomBrowser) {
+              this.roomBrowser.showError(msg.reason);
+            } else {
+              this.lobby.showToast(`🔒 ${msg.reason}`);
+            }
             break;
           }
 

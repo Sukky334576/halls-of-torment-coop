@@ -381,17 +381,19 @@ export type ClientMessage =
   | { type: 'SEND_WELL_GEAR'; gearId: string }
   | { type: 'SURRENDER' }
   | { type: 'PAUSE_GAME'; isPaused: boolean }
-  | { type: 'CREATE_ROOM'; roomName?: string }
+  | { type: 'CREATE_ROOM'; roomName?: string; password?: string }
   | { type: 'LIST_ROOMS' }
-  | { type: 'JOIN_ROOM'; roomId: string }
+  | { type: 'JOIN_ROOM'; roomId: string; password?: string }
   | { type: 'LEAVE_ROOM' };
 
 /** One entry in the public room browser (see server.ts's room list) — everyone who's
- * logged in and not currently in a room sees this list and can join any of them directly. */
+ * logged in and not currently in a room sees this list and can join any of them directly.
+ * `hasPassword` only signals a lock icon — the actual password never goes in this list. */
 export interface RoomSummary {
   id: string;
   name: string;
   hostName: string;
+  hasPassword: boolean;
   playerCount: number;
   maxPlayers: number;
   isStarted: boolean;

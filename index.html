@@ -4124,11 +4124,13 @@
     .room-browser-create-form {
       width: 100%;
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
     }
 
     .room-browser-create-form .account-input {
       flex: 1;
+      min-width: 140px;
     }
 
     .room-browser-create-form .account-submit-btn {
@@ -4153,15 +4155,33 @@
       margin: 8px 0;
     }
 
+    .room-browser-error {
+      width: 100%;
+      font-size: 0.78rem;
+      color: #fca5a5;
+      background: rgba(127, 29, 29, 0.35);
+      border: 1px solid #7f1d1d;
+      border-radius: 6px;
+      padding: 8px 12px;
+      text-align: center;
+      margin: 0;
+    }
+
     .room-row {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       justify-content: space-between;
-      gap: 12px;
+      gap: 8px 12px;
       background: #0a0e17;
       border: 1px solid #2d3b55;
       border-radius: 8px;
       padding: 10px 14px;
+    }
+
+    .room-row-password-input {
+      flex: 1 1 120px;
+      max-width: 160px;
     }
 
     .room-row-info {
