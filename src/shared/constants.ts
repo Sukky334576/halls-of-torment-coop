@@ -15,7 +15,7 @@ export const GAME_CONSTANTS = {
   // How long a disconnected player's character stays alive (ghosted, untargetable) waiting
   // for them to reconnect (browser refresh, dropped WebSocket) before being removed for real.
   RECONNECT_GRACE_MS: 60_000,
-  MAGNET_DROP_CHANCE: 0.015, // 1.5% chance per kill — pulls every EXP gem & gold coin on the map to the team when collected
+  MAGNET_DROP_CHANCE: 0.0075, // 0.75% chance per kill (halved from 1.5%, still felt too common) — pulls every EXP gem & gold coin on the map to the team when collected
 
   // EXP requirements (nerfed progression by ~30%)
   EXP_BASE: 20,
