@@ -24,6 +24,11 @@ export interface GroundDecal {
     shape: 'dust' | 'shard' | 'skull_chip' | 'rib' | 'droplet' | 'rubble';
     angle?: number;
   }[];
+  // Lazily created and cached on first draw (BONE_DUST/DEMONIC_ASH only) — the gradient's
+  // shape only depends on `radius`, which is fixed at spawn, so re-creating it every frame
+  // for a decal's whole 3s lifetime was pure waste. Up to 250 of these can be alive at once
+  // (see the cap below), each drawn every frame, so this was a real per-frame cost.
+  cachedGradient?: CanvasGradient;
 }
 
 export class Renderer2D {
@@ -364,11 +369,13 @@ export class Renderer2D {
 
       if (d.type === 'BONE_DUST') {
         // Soft bone dust powdery cloud on dungeon floor
-        const dustGrad = ctx.createRadialGradient(0, 0, 2, 0, 0, d.radius * 0.9);
-        dustGrad.addColorStop(0, 'rgba(226, 232, 240, 0.50)');
-        dustGrad.addColorStop(0.5, 'rgba(148, 163, 184, 0.22)');
-        dustGrad.addColorStop(1, 'rgba(100, 116, 139, 0)');
-        ctx.fillStyle = dustGrad;
+        if (!d.cachedGradient) {
+          d.cachedGradient = ctx.createRadialGradient(0, 0, 2, 0, 0, d.radius * 0.9);
+          d.cachedGradient.addColorStop(0, 'rgba(226, 232, 240, 0.50)');
+          d.cachedGradient.addColorStop(0.5, 'rgba(148, 163, 184, 0.22)');
+          d.cachedGradient.addColorStop(1, 'rgba(100, 116, 139, 0)');
+        }
+        ctx.fillStyle = d.cachedGradient;
         ctx.beginPath();
         ctx.arc(0, 0, d.radius * 0.9, 0, Math.PI * 2);
         ctx.fill();
@@ -412,11 +419,13 @@ export class Renderer2D {
           ctx.restore();
         }
       } else if (d.type === 'DEMONIC_ASH') {
-        const ashGrad = ctx.createRadialGradient(0, 0, 1, 0, 0, d.radius * 0.8);
-        ashGrad.addColorStop(0, 'rgba(114, 9, 183, 0.35)');
-        ashGrad.addColorStop(0.6, 'rgba(255, 84, 0, 0.15)');
-        ashGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = ashGrad;
+        if (!d.cachedGradient) {
+          d.cachedGradient = ctx.createRadialGradient(0, 0, 1, 0, 0, d.radius * 0.8);
+          d.cachedGradient.addColorStop(0, 'rgba(114, 9, 183, 0.35)');
+          d.cachedGradient.addColorStop(0.6, 'rgba(255, 84, 0, 0.15)');
+          d.cachedGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        }
+        ctx.fillStyle = d.cachedGradient;
         ctx.beginPath();
         ctx.arc(0, 0, d.radius * 0.8, 0, Math.PI * 2);
         ctx.fill();
