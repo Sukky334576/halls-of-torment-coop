@@ -489,8 +489,18 @@ wss.on('connection', (ws: WebSocket) => {
           }
           if (resumed) break;
 
-          // Already in a (not-yet-started) room — e.g. changing hero class mid-lobby.
+          // Already in a (not-yet-started) room — e.g. changing hero class mid-lobby. The
+          // room only ever learns a player's class here — CREATE_ROOM/JOIN_ROOM add them with
+          // whatever client.playerClass was at the time, which is still the connection
+          // default (Swordsman) since hero selection happens only after joining a room. Re-
+          // running addPlayer() re-creates their ServerPlayer with the now-current class
+          // (safe: it's a no-op-position-wise re-add keyed by the same deviceId, and this
+          // whole branch is unreached once the match has actually started).
           if (client.roomId) {
+            const entry = rooms.get(client.roomId);
+            if (entry) {
+              entry.room.addPlayer(client.deviceId, client.name, client.playerClass, client.unlockedSkills, client.treePassives);
+            }
             broadcastRoomState(client.roomId);
           }
           break;
