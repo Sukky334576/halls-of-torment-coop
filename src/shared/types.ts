@@ -434,4 +434,4 @@ export type ServerMessage =
   | { type: 'WELL_GEAR_RETRIEVED'; gearName: string; retrievedBy: string }
   | { type: 'ROOM_LIST'; rooms: RoomSummary[] }
   | { type: 'GRANT_GOLD'; amount: number; message: string; thaiMessage: string; grantId?: string }
-  | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number; reason?: 'BOSS_ENRAGE_EXECUTE' };
+  | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number; reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER' };

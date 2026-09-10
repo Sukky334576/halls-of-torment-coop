@@ -666,7 +666,7 @@ export class HUD {
     survivalTime: number,
     totalKills: number,
     goldEarned: number,
-    reason?: 'BOSS_ENRAGE_EXECUTE'
+    reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER'
   ): void {
     const modal = document.getElementById('game-over-modal');
     if (!modal) return;
@@ -689,9 +689,14 @@ export class HUD {
         title.textContent = I18n.t('gameover.defeat_title');
         title.style.color = '#ef4444';
       }
-      // The hard boss-execute deadline gets its own message so it doesn't read as a normal
-      // combat wipe — see HordeDirector.isDeadlineExpired / GameRoom.tick().
-      if (sub) sub.textContent = reason === 'BOSS_ENRAGE_EXECUTE' ? I18n.t('gameover.boss_enrage_execute') : I18n.t('gameover.defeat_sub');
+      // The hard boss-execute deadline and a self-inflicted surrender each get their own
+      // message so neither reads as a normal combat wipe — see HordeDirector.isDeadlineExpired
+      // / GameRoom.tick() for the former, GameRoom.handleSurrender for the latter.
+      if (sub) {
+        if (reason === 'BOSS_ENRAGE_EXECUTE') sub.textContent = I18n.t('gameover.boss_enrage_execute');
+        else if (reason === 'SURRENDER') sub.textContent = I18n.t('gameover.surrender_sub');
+        else sub.textContent = I18n.t('gameover.defeat_sub');
+      }
     }
 
     // Reset the deadline countdown UI so it doesn't linger into the next run's HUD.

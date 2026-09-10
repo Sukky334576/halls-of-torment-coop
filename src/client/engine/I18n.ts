@@ -87,6 +87,10 @@ const TRANSLATIONS: TranslationKeys = {
     th: 'บอสทรงพลังเกินกว่าจะสู้ต่อไหว ความมืดกลืนกินปาร์ตี้ของคุณ',
     en: 'The boss proved too powerful — the darkness consumed your party.'
   },
+  'gameover.surrender_sub': {
+    th: 'คุณยอมแพ้ถอยทัพ — ได้รับเหรียญทองเพียง 50% จากที่เก็บมาได้',
+    en: 'You surrendered and retreated — only 50% of collected gold is kept.'
+  },
   'hud.boss_slain': {
     th: '🏆 {boss} ถูกกำจัดแล้ว! เวฟต่อไปใน {sec} วิ... 🏆',
     en: '🏆 {boss} SLAIN! NEXT WAVE IN {sec}S... 🏆'

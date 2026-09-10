@@ -394,16 +394,24 @@ export class GameRoom {
 
     console.log(`🏳️ Player ${player.name} (${playerId}) surrendered`);
 
+    // Surrendering is a deliberate choice to bail, unlike dying or timing out (which still
+    // pay out 100% of whatever gold was actually collected) — only reduce it here, not in
+    // any other GAME_OVER path.
+    player.gold = Math.round(player.gold * GAME_CONSTANTS.SURRENDER_GOLD_RETENTION);
+
     // If solo or last player, trigger room-wide GAME_OVER
     if (this.players.size <= 1) {
       this.isOver = true;
-      this.broadcastGameOver(false);
+      this.broadcastGameOver(false, undefined, 'SURRENDER');
     } else {
       // In co-op, send GAME_OVER directly to surrendering player, then actually remove them
       // from the room. Leaving them in `players` as merely dead meant the client's "Return to
       // Hub" button (a plain page reload) would reconnect straight back into this same
       // still-active room via the JOIN_LOBBY resume check, trapping the player who just left.
-      this.sendGameOverTo(player, false);
+      // 'SURRENDER' only tags THIS message — the fallback broadcast below (for teammates who
+      // died naturally, not by choice, if this happened to be the last one standing) must not
+      // carry it.
+      this.sendGameOverTo(player, false, undefined, 'SURRENDER');
       this.removePlayer(playerId);
 
       let aliveCount = 0;
@@ -2914,7 +2922,7 @@ export class GameRoom {
 
   // Gold is personal now, so GAME_OVER can't be a single shared broadcast payload —
   // each player needs their own `personalGold` baked into their copy of the message.
-  private sendGameOverTo(player: ServerPlayer, victory: boolean, clearedStageId?: number, reason?: 'BOSS_ENRAGE_EXECUTE'): void {
+  private sendGameOverTo(player: ServerPlayer, victory: boolean, clearedStageId?: number, reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER'): void {
     this.sendCallback(player.id, {
       type: 'GAME_OVER',
       victory,
@@ -2928,7 +2936,7 @@ export class GameRoom {
     });
   }
 
-  private broadcastGameOver(victory: boolean, clearedStageId?: number, reason?: 'BOSS_ENRAGE_EXECUTE'): void {
+  private broadcastGameOver(victory: boolean, clearedStageId?: number, reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER'): void {
     for (const player of this.players.values()) {
       this.sendGameOverTo(player, victory, clearedStageId, reason);
     }

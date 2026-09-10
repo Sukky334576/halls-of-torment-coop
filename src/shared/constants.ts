@@ -16,6 +16,10 @@ export const GAME_CONSTANTS = {
   // for them to reconnect (browser refresh, dropped WebSocket) before being removed for real.
   RECONNECT_GRACE_MS: 60_000,
   MAGNET_DROP_CHANCE: 0.0075, // 0.75% chance per kill (halved from 1.5%, still felt too common) — pulls every EXP gem & gold coin on the map to the team when collected
+  // Surrendering is a deliberate choice to bail, not a consequence of difficulty like dying
+  // or timing out — those still pay out 100% of collected gold. Keep this in sync with the
+  // "รางวัลได้แค่ xx%" framing if the percentage ever changes.
+  SURRENDER_GOLD_RETENTION: 0.5, // keep 50% of personally-collected gold on surrender
 
   // EXP requirements (nerfed progression by ~30%)
   EXP_BASE: 20,
