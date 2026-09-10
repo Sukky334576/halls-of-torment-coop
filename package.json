@@ -15,11 +15,16 @@
     "tunnel:windows": "tools\\cloudflared.exe tunnel --url http://localhost:3000"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.0.3",
+    "jsonwebtoken": "^9.0.3",
     "serve-static": "^2.2.1",
     "three": "^0.170.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.10.0",
     "@types/serve-static": "^2.2.0",
     "@types/three": "^0.170.0",

@@ -223,6 +223,7 @@
     }
 
     .btn-lang-toggle,
+    .btn-account,
     .btn-gear-vault,
     .btn-trials-btn,
     .btn-skill-tree {
@@ -248,6 +249,7 @@
     }
 
     .btn-lang-toggle:hover,
+    .btn-account:hover,
     .btn-gear-vault:hover,
     .btn-trials-btn:hover,
     .btn-skill-tree:hover {
@@ -3881,6 +3883,119 @@
       border-color: #f87171;
       color: #ffffff;
       transform: scale(1.08);
+    }
+
+    /* --- Account (login/register) modal --- */
+    .account-modal-panel {
+      width: 90%;
+      max-width: 380px;
+    }
+
+    .account-body {
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .account-tabs {
+      display: flex;
+      gap: 6px;
+      background: #0a0e17;
+      border: 1px solid #222e44;
+      border-radius: 8px;
+      padding: 4px;
+    }
+
+    .account-tab {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      font-family: 'Prompt', sans-serif;
+      font-weight: 600;
+      font-size: 0.82rem;
+      padding: 8px 0;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .account-tab.active {
+      background: linear-gradient(180deg, #273042, #161c27);
+      color: #ffd166;
+      box-shadow: 0 0 8px rgba(255, 209, 102, 0.2);
+    }
+
+    #account-form {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .account-input {
+      background: #0a0e17;
+      border: 1px solid #2d3b55;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.85rem;
+      padding: 10px 12px;
+    }
+
+    .account-input:focus {
+      outline: none;
+      border-color: #c5a059;
+    }
+
+    .account-hint {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      line-height: 1.4;
+      margin: 0;
+    }
+
+    .account-error {
+      font-size: 0.78rem;
+      color: #fca5a5;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin: 0;
+    }
+
+    .account-submit-btn {
+      background: linear-gradient(135deg, #854d0e, #ca8a04);
+      border: 1px solid #f59e0b;
+      color: #fff8e1;
+      font-family: 'Prompt', sans-serif;
+      font-weight: 700;
+      font-size: 0.88rem;
+      padding: 10px 0;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .account-submit-btn:hover:not(:disabled) {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
+    }
+
+    .account-submit-btn:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    .account-welcome {
+      font-size: 0.95rem;
+      color: #cdd6e3;
+      margin: 0;
+    }
+
+    .account-welcome strong {
+      color: #ffd166;
     }
 
     /* --- RARITY THEMING --- */

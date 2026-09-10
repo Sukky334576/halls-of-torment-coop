@@ -5,6 +5,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import serveStatic from 'serve-static';
 import { ClientMessage, ServerMessage, PlayerClass } from '../shared/types';
 import { GameRoom } from './engine/GameRoom';
+import { createUser, findUserByUsername, getProgression, setProgression } from './db';
+import { hashPassword, verifyPassword, signToken, verifyToken, isRateLimited, USERNAME_RE, MIN_PASSWORD_LENGTH } from './auth';
 
 interface ConnectedClient {
   ws: WebSocket;
@@ -74,10 +76,140 @@ export function grantGoldToAll(amount: number): { success: boolean; amount: numb
   return { success: true, amount, activePlayers: activeCount, grantId };
 }
 
+// --- Account system: username/password login + server-side progression sync ---
+// No framework (see the rest of this file) — a tiny manual body reader instead of a
+// body-parsing middleware, matching how /api/grant-gold already just reads query params.
+const MAX_BODY_BYTES = 64 * 1024; // Progression saves are a modest JSON blob; way over-generous.
+function readJsonBody<T>(req: http.IncomingMessage): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error('Request body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
+      } catch {
+        reject(new Error('Invalid JSON body'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function sendJson(res: http.ServerResponse, status: number, body: unknown) {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
+}
+
+/** Reads the Bearer token from the Authorization header. Returns the authenticated user id,
+ * or null (and already wrote a 401 response) if the token is missing/invalid. */
+function requireAuth(req: http.IncomingMessage, res: http.ServerResponse): number | null {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const payload = token ? verifyToken(token) : null;
+  if (!payload) {
+    sendJson(res, 401, { success: false, error: 'Missing or invalid auth token' });
+    return null;
+  }
+  return payload.uid;
+}
+
+async function handleRegister(req: http.IncomingMessage, res: http.ServerResponse) {
+  let body: { username?: string; password?: string };
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    return sendJson(res, 400, { success: false, error: 'Invalid JSON body' });
+  }
+  const username = (body.username || '').trim();
+  const password = body.password || '';
+
+  if (!USERNAME_RE.test(username)) {
+    return sendJson(res, 400, { success: false, error: 'Username must be 3-20 letters, numbers, or underscores' });
+  }
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return sendJson(res, 400, { success: false, error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+  }
+  if (findUserByUsername(username)) {
+    return sendJson(res, 409, { success: false, error: 'Username already taken' });
+  }
+
+  const passwordHash = await hashPassword(password);
+  const user = createUser(username, passwordHash);
+  const token = signToken(user.id);
+  console.log(`📝 New account registered: ${username}`);
+  sendJson(res, 201, { success: true, token, username: user.username });
+}
+
+async function handleLogin(req: http.IncomingMessage, res: http.ServerResponse) {
+  const ip = req.socket.remoteAddress || 'unknown';
+  if (isRateLimited(ip)) {
+    return sendJson(res, 429, { success: false, error: 'Too many login attempts — try again in a minute' });
+  }
+
+  let body: { username?: string; password?: string };
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    return sendJson(res, 400, { success: false, error: 'Invalid JSON body' });
+  }
+  const username = (body.username || '').trim();
+  const password = body.password || '';
+
+  const user = findUserByUsername(username);
+  // Same generic message whether the username doesn't exist or the password is wrong —
+  // confirming which one was wrong would let an attacker enumerate registered usernames.
+  const genericError = { success: false, error: 'Invalid username or password' };
+  if (!user) {
+    return sendJson(res, 401, genericError);
+  }
+  const passwordOk = await verifyPassword(password, user.password_hash);
+  if (!passwordOk) {
+    return sendJson(res, 401, genericError);
+  }
+
+  const token = signToken(user.id);
+  sendJson(res, 200, { success: true, token, username: user.username });
+}
+
+async function handleGetProgression(req: http.IncomingMessage, res: http.ServerResponse) {
+  const userId = requireAuth(req, res);
+  if (userId === null) return;
+
+  const raw = getProgression(userId);
+  // `data` is already a JSON-shaped object once parsed here — the client sends/receives
+  // its MetaSaveData directly, not double-encoded as a JSON string within JSON.
+  sendJson(res, 200, { success: true, data: raw ? JSON.parse(raw) : null });
+}
+
+async function handleSaveProgression(req: http.IncomingMessage, res: http.ServerResponse) {
+  const userId = requireAuth(req, res);
+  if (userId === null) return;
+
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    return sendJson(res, 400, { success: false, error: 'Invalid JSON body' });
+  }
+  // Intentionally not schema-validated (see db.ts setProgression comment) — this project's
+  // current friend-testing scale doesn't warrant an anti-cheat check on your own save data.
+  setProgression(userId, JSON.stringify(body));
+  sendJson(res, 200, { success: true });
+}
+
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
@@ -86,6 +218,24 @@ const server = http.createServer((req, res) => {
   }
 
   const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+
+  if (url.pathname === '/api/register' && req.method === 'POST') {
+    handleRegister(req, res);
+    return;
+  }
+  if (url.pathname === '/api/login' && req.method === 'POST') {
+    handleLogin(req, res);
+    return;
+  }
+  if (url.pathname === '/api/progression' && req.method === 'GET') {
+    handleGetProgression(req, res);
+    return;
+  }
+  if (url.pathname === '/api/progression' && req.method === 'POST') {
+    handleSaveProgression(req, res);
+    return;
+  }
+
   if (url.pathname === '/api/grant-gold') {
     const amount = parseInt(url.searchParams.get('amount') || '35000', 10);
     const MAX_GRANT_AMOUNT = 1_000_000;
@@ -189,16 +339,6 @@ wss.on('connection', (ws: WebSocket) => {
   };
   clients.set(clientId, client);
   console.log(`👤 Player connected: ${clientId} (Total active: ${clients.size})`);
-
-  // Grant 35,000 Gold Gift to current players (Blackout Compensation)
-  const giftMsg: ServerMessage = {
-    type: 'GRANT_GOLD',
-    amount: 35000,
-    grantId: 'airdrop_35k_blackout',
-    message: '🎁 Server Reward: 35,000 Gold Coins awarded to all survivors!',
-    thaiMessage: '🎁 ของขวัญชดเชยจากเซิร์ฟเวอร์: ได้รับ 35,000 Gold Coins เรียบร้อย!'
-  };
-  ws.send(JSON.stringify(giftMsg));
 
   broadcastLobbyState();
 

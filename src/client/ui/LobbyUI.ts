@@ -5,6 +5,8 @@ import { MetaProgression } from '../engine/MetaProgression';
 import { SkillTreeUI } from './SkillTreeUI';
 import { GearVaultUI } from './GearVaultUI';
 import { HallOfTrialsUI } from './HallOfTrialsUI';
+import { AccountUI } from './AccountUI';
+import { AuthClient } from '../engine/AuthClient';
 import { SoundManager } from '../engine/SoundManager';
 import { STAGES } from '../../shared/stages';
 import { I18n } from '../engine/I18n';
@@ -34,6 +36,7 @@ export class LobbyUI {
   public skillTree: SkillTreeUI;
   public gearVault: GearVaultUI;
   public hallOfTrials: HallOfTrialsUI;
+  public accountUI: AccountUI;
   private sound?: SoundManager;
 
   // Real-time Multiplayer Party & Lobby State
@@ -103,6 +106,12 @@ export class LobbyUI {
     this.skillTree = new SkillTreeUI(document.body, () => this.refreshCoins(), this.sound);
     this.gearVault = new GearVaultUI(document.body, this.sound);
     this.hallOfTrials = new HallOfTrialsUI(document.body, this.sound);
+    this.accountUI = new AccountUI(document.body, this.sound);
+    // A synced login/register can change coins, unlocked heroes, skill tree, and gear vault
+    // all at once — those are drawn across several places (DOM text, canvas pedestals, other
+    // modals), so a full reload is the simplest way to guarantee everything reflects the
+    // newly-loaded account state correctly, rather than auditing every render path.
+    this.accountUI.onProgressionSynced = () => window.location.reload();
 
     this.gearVault.onEquipChange = () => {
       this.refreshCoins();
@@ -141,6 +150,9 @@ export class LobbyUI {
             <div class="lobby-top-bar-right">
               <button id="btn-lang-toggle" class="btn btn-lang-toggle" title="สลับภาษา / Toggle Language">
                 ${isTh ? 'ภาษาไทย' : 'English'}
+              </button>
+              <button id="btn-open-account" class="btn btn-account" title="${isTh ? 'บัญชีผู้เล่น' : 'Account'}">
+                👤 ${AuthClient.isLoggedIn() ? AuthClient.getUsername() : (isTh ? 'บัญชี' : 'Account')}
               </button>
               <div class="lobby-coin-badge">
                 <span class="coin-icon-svg">
@@ -273,6 +285,10 @@ export class LobbyUI {
 
     this.container.querySelector('#btn-open-trials')?.addEventListener('click', () => {
       this.hallOfTrials.show();
+    });
+
+    this.container.querySelector('#btn-open-account')?.addEventListener('click', () => {
+      this.accountUI.show();
     });
 
     // Nickname input handlers

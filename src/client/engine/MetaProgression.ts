@@ -2,6 +2,7 @@ import { PlayerClass } from '../../shared/types';
 import { CLASS_SKILL_TREES, SkillTreeNode, ClassSkillTree, StatModType } from '../../shared/skillTreeData';
 import { GearSlot, GearItem, GEAR_CATALOG, getGearItem } from '../../shared/gearData';
 import { TrialQuest, TRIAL_QUESTS, getTrialQuest } from '../../shared/trialQuests';
+import { AuthClient } from './AuthClient';
 
 export interface HeroUnlockRequirement {
   id: PlayerClass;
@@ -143,43 +144,31 @@ export function combineIncreasedAndMore(increasedSum: number, moreMultipliers: n
   return ((1 + increasedSum / 100) * moreProduct - 1) * 100;
 }
 
-export const ALL_PLAYABLE_HEROES: PlayerClass[] = [
+// The only heroes with no HERO_UNLOCK_REQUIREMENTS entry (null) — everyone starts with just
+// these; the rest must be bought via buyHero() once their real-progress condition is met.
+export const STARTER_HEROES: PlayerClass[] = [
   PlayerClass.SWORDSMAN,
   PlayerClass.ARCHER,
   PlayerClass.SORCERESS,
-  PlayerClass.CLERIC,
-  PlayerClass.COMMANDO,
-  PlayerClass.CAT_TANK,
-  PlayerClass.COWBOY,
-  PlayerClass.CELESTIAL_MECHA,
-  PlayerClass.GAMBLER
+  PlayerClass.CLERIC
 ];
 
 export class MetaProgressionManager {
-  private static STORAGE_KEY = 'torment_meta_save_v2';
+  // Bumped from v2: v2 saves were created under the testing-phase shortcuts (every hero
+  // force-unlocked on every load, a one-time +35,000 gold airdrop) — bumping the key means
+  // existing saves are ignored and everyone starts clean under the real progression rules
+  // below instead of silently keeping their inflated v2 state.
+  private static STORAGE_KEY = 'torment_meta_save_v3';
   private data: MetaSaveData;
 
   constructor() {
     this.data = this.load();
-    // Ensure all 9 heroes are unlocked for testing immediately
-    this.data.unlockedHeroes = [...ALL_PLAYABLE_HEROES];
-    this.save();
-    this.checkAndGrantAirdrop();
     this.recomputeSignatures();
-  }
-
-  private checkAndGrantAirdrop(): void {
-    const AIRDROP_KEY = 'torment_server_airdrop_35k_v2';
-    try {
-      if (!localStorage.getItem(AIRDROP_KEY)) {
-        this.data.coins += 35000;
-        this.data.trialStats.totalGoldCollected += 35000;
-        this.save();
-        localStorage.setItem(AIRDROP_KEY, 'claimed');
-        console.log('🎁 Claimed server airdrop: +35,000 Gold Coins!');
-      }
-    } catch (e) {
-      console.warn('Could not check airdrop key', e);
+    // Already logged in from a previous visit (token still in localStorage) — pull this
+    // account's cloud save automatically so a returning player doesn't have to log in again
+    // just to see their synced progress; a fresh login/register still calls this too.
+    if (AuthClient.isLoggedIn()) {
+      this.syncFromServer();
     }
   }
 
@@ -187,72 +176,83 @@ export class MetaProgressionManager {
     try {
       const raw = localStorage.getItem(MetaProgressionManager.STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
-        const allocatedNodes: string[] = Array.isArray(parsed.allocatedNodes)
-          ? parsed.allocatedNodes
-          : [];
-
-        // Roots default to allocated
-        const defaultRoots = ['sw_root', 'so_root', 'ar_root', 'cl_root', 'uni_root'];
-        for (const rootId of defaultRoots) {
-          if (!allocatedNodes.includes(rootId)) {
-            allocatedNodes.push(rootId);
-          }
-        }
-
-        const vaultInventory = Array.isArray(parsed.vaultInventory) && parsed.vaultInventory.length > 0
-          ? parsed.vaultInventory
-          : ['helm_iron_visage', 'boots_leather_treads', 'ring_copper_band'];
-
-        const equippedGear = typeof parsed.equippedGear === 'object' && parsed.equippedGear
-          ? parsed.equippedGear
-          : { HEAD: 'helm_iron_visage' };
-
-        const unlockedHeroes: PlayerClass[] = [...ALL_PLAYABLE_HEROES];
-
-        const trialStats: TrialStats = {
-          totalKills: parsed.trialStats?.totalKills || 0,
-          totalDeaths: parsed.trialStats?.totalDeaths || 0,
-          tomesCollected: parsed.trialStats?.tomesCollected || 0,
-          maxSurvivalSeconds: parsed.trialStats?.maxSurvivalSeconds || 0,
-          evolutionsCrafted: parsed.trialStats?.evolutionsCrafted || 0,
-          elementalReactionsTriggered: parsed.trialStats?.elementalReactionsTriggered || 0,
-          totalGoldCollected: parsed.trialStats?.totalGoldCollected || 0,
-          stagesCleared: Array.isArray(parsed.trialStats?.stagesCleared) ? parsed.trialStats.stagesCleared : []
-        };
-
-        const claimedTrialIds: string[] = Array.isArray(parsed.claimedTrialIds) ? parsed.claimedTrialIds : [];
-
-        const extraPotions = {
-          rerolls: parsed.extraPotions?.rerolls || 0,
-          banishes: parsed.extraPotions?.banishes || 0,
-          locks: parsed.extraPotions?.locks || 0
-        };
-
-        return {
-          coins: typeof parsed.coins === 'number' ? parsed.coins : 25,
-          unlockedSkills: Array.isArray(parsed.unlockedSkills) ? parsed.unlockedSkills : [],
-          allocatedNodes,
-          highestStageUnlocked: typeof parsed.highestStageUnlocked === 'number' ? Math.max(1, Math.min(3, parsed.highestStageUnlocked)) : 1,
-          unlockedHeroes,
-          vaultInventory,
-          equippedGear,
-          trialStats,
-          claimedTrialIds,
-          extraPotions
-        };
+        return MetaProgressionManager.parseSaveData(JSON.parse(raw));
       }
     } catch (e) {
       console.warn('Failed to load meta progression save, using defaults', e);
     }
+    const defaultData = MetaProgressionManager.defaultSaveData();
+    this.saveData(defaultData);
+    return defaultData;
+  }
 
-    // Default: start with 25 coins, roots allocated, Stage 1 unlocked, starter gear in vault, 4 starter heroes
-    const defaultData: MetaSaveData = {
+  /** Shared by load() (localStorage) and syncFromServer() (server progression) — both are
+   * the same MetaSaveData shape from an untrusted-ish source (an older client version, or a
+   * hand-edited save), so both need the same field-by-field defaulting. */
+  private static parseSaveData(parsed: any): MetaSaveData {
+    const allocatedNodes: string[] = Array.isArray(parsed.allocatedNodes) ? parsed.allocatedNodes : [];
+
+    // Roots default to allocated
+    const defaultRoots = ['sw_root', 'so_root', 'ar_root', 'cl_root', 'uni_root'];
+    for (const rootId of defaultRoots) {
+      if (!allocatedNodes.includes(rootId)) {
+        allocatedNodes.push(rootId);
+      }
+    }
+
+    const vaultInventory = Array.isArray(parsed.vaultInventory) && parsed.vaultInventory.length > 0
+      ? parsed.vaultInventory
+      : ['helm_iron_visage', 'boots_leather_treads', 'ring_copper_band'];
+
+    const equippedGear = typeof parsed.equippedGear === 'object' && parsed.equippedGear
+      ? parsed.equippedGear
+      : { HEAD: 'helm_iron_visage' };
+
+    const unlockedHeroes: PlayerClass[] = Array.isArray(parsed.unlockedHeroes) && parsed.unlockedHeroes.length > 0
+      ? parsed.unlockedHeroes
+      : [...STARTER_HEROES];
+
+    const trialStats: TrialStats = {
+      totalKills: parsed.trialStats?.totalKills || 0,
+      totalDeaths: parsed.trialStats?.totalDeaths || 0,
+      tomesCollected: parsed.trialStats?.tomesCollected || 0,
+      maxSurvivalSeconds: parsed.trialStats?.maxSurvivalSeconds || 0,
+      evolutionsCrafted: parsed.trialStats?.evolutionsCrafted || 0,
+      elementalReactionsTriggered: parsed.trialStats?.elementalReactionsTriggered || 0,
+      totalGoldCollected: parsed.trialStats?.totalGoldCollected || 0,
+      stagesCleared: Array.isArray(parsed.trialStats?.stagesCleared) ? parsed.trialStats.stagesCleared : []
+    };
+
+    const claimedTrialIds: string[] = Array.isArray(parsed.claimedTrialIds) ? parsed.claimedTrialIds : [];
+
+    const extraPotions = {
+      rerolls: parsed.extraPotions?.rerolls || 0,
+      banishes: parsed.extraPotions?.banishes || 0,
+      locks: parsed.extraPotions?.locks || 0
+    };
+
+    return {
+      coins: typeof parsed.coins === 'number' ? parsed.coins : 25,
+      unlockedSkills: Array.isArray(parsed.unlockedSkills) ? parsed.unlockedSkills : [],
+      allocatedNodes,
+      highestStageUnlocked: typeof parsed.highestStageUnlocked === 'number' ? Math.max(1, Math.min(3, parsed.highestStageUnlocked)) : 1,
+      unlockedHeroes,
+      vaultInventory,
+      equippedGear,
+      trialStats,
+      claimedTrialIds,
+      extraPotions
+    };
+  }
+
+  // Default: start with 25 coins, roots allocated, Stage 1 unlocked, starter gear in vault, 4 starter heroes
+  private static defaultSaveData(): MetaSaveData {
+    return {
       coins: 25,
       unlockedSkills: [],
       allocatedNodes: ['sw_root', 'so_root', 'ar_root', 'cl_root', 'uni_root'],
       highestStageUnlocked: 1,
-      unlockedHeroes: [...ALL_PLAYABLE_HEROES],
+      unlockedHeroes: [...STARTER_HEROES],
       vaultInventory: ['helm_iron_visage', 'boots_leather_treads', 'ring_copper_band'],
       equippedGear: { HEAD: 'helm_iron_visage' },
       trialStats: {
@@ -268,8 +268,6 @@ export class MetaProgressionManager {
       claimedTrialIds: [],
       extraPotions: { rerolls: 0, banishes: 0, locks: 0 }
     };
-    this.saveData(defaultData);
-    return defaultData;
   }
 
   private saveData(data: MetaSaveData): void {
@@ -280,8 +278,35 @@ export class MetaProgressionManager {
     }
   }
 
+  private serverSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
   public save(): void {
     this.saveData(this.data);
+    // localStorage is written above unconditionally — it stays the source of truth even if
+    // this fails. `save()` fires on nearly every player action, so pushing debounced instead
+    // of on every single call collapses a burst of saves (e.g. allocating several skill
+    // nodes back to back) into one request instead of one per action.
+    if (AuthClient.isLoggedIn()) {
+      if (this.serverSyncTimer) clearTimeout(this.serverSyncTimer);
+      this.serverSyncTimer = setTimeout(() => {
+        AuthClient.pushProgression(this.data);
+      }, 2000);
+    }
+  }
+
+  /** Call right after a successful login/register. An existing account's server data
+   * (if any) replaces local state entirely — this is a "load my cloud save" action, not a
+   * merge. A brand-new account has no server data yet, so instead this pushes whatever
+   * local/guest progress already exists up as that account's starting point. */
+  public async syncFromServer(): Promise<void> {
+    const serverData = await AuthClient.fetchProgression();
+    if (serverData) {
+      this.data = MetaProgressionManager.parseSaveData(serverData);
+      this.saveData(this.data);
+      this.recomputeSignatures();
+    } else {
+      await AuthClient.pushProgression(this.data);
+    }
   }
 
   public getCoins(): number {
@@ -740,8 +765,7 @@ export class MetaProgressionManager {
 
   // --- Hero Unlock & Shop Progression ---
   public isHeroUnlocked(heroClass: PlayerClass): boolean {
-    // All 9 heroes fully unlocked for gameplay and testing
-    return true;
+    return this.data.unlockedHeroes.includes(heroClass);
   }
 
   public getHeroUnlockRequirement(heroClass: PlayerClass): HeroUnlockRequirement | null {
@@ -806,12 +830,7 @@ export class MetaProgressionManager {
 
     this.data.coins -= status.price;
     if (!this.data.unlockedHeroes) {
-      this.data.unlockedHeroes = [
-        PlayerClass.SWORDSMAN,
-        PlayerClass.ARCHER,
-        PlayerClass.SORCERESS,
-        PlayerClass.CLERIC
-      ];
+      this.data.unlockedHeroes = [...STARTER_HEROES];
     }
     this.data.unlockedHeroes.push(heroClass);
     this.save();
