@@ -428,6 +428,15 @@ export class GameRoom {
   private tick(): void {
     if (!this.isStarted || this.isOver) return;
 
+    // Cleared unconditionally, before the pause check below — damageNumbers is a one-tick
+    // transient broadcast, but used to only get reset here, AFTER an early-return on pause.
+    // Whatever was in it from the last active tick (e.g. mid-combat when the player opened
+    // the pause menu) then got re-broadcast, unchanged, on every frozen tick forever, since
+    // nothing else ever cleared or repopulated it while paused — the client's hit-impact
+    // sound/VFX trigger just checks "is this tick's damageNumbers non-empty", so it kept
+    // firing continuously for as long as the game stayed paused.
+    this.damageNumbers = [];
+
     // 0. If paused (level up trait selection), keep network alive and freeze world
     if (this.isPaused) {
       this.broadcastTick();
@@ -436,7 +445,6 @@ export class GameRoom {
 
     const dt = GAME_CONSTANTS.SERVER_TICK_MS / 1000;
     this.tickCount++;
-    this.damageNumbers = [];
 
     // 1. Update Players & Co-op Revive
     // Two passes: first collect every alive player, then resolve revive circles against the
