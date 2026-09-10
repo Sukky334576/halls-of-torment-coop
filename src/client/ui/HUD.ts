@@ -3,6 +3,7 @@ import { CLASS_DEFINITIONS } from '../../shared/classes';
 import { SoundManager } from '../engine/SoundManager';
 import { MiniMap } from './MiniMap';
 import { I18n } from '../engine/I18n';
+import { escapeHtml } from '../engine/sanitize';
 
 interface ActiveFloatingText {
   x: number;
@@ -437,7 +438,7 @@ export class HUD {
           return `
             <div class="party-frame ${isDead ? 'frame-dead' : ''}">
               <div class="frame-header">
-                <span class="frame-name">${p.name}${p.id === localPlayerId ? youLabel : ''}</span>
+                <span class="frame-name">${escapeHtml(p.name)}${p.id === localPlayerId ? youLabel : ''}</span>
                 <span class="frame-lvl">Lv.${p.level}</span>
               </div>
               <div class="frame-class" style="color: #${classDef.color.toString(16).padStart(6, '0')}">

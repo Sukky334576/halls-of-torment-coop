@@ -10,6 +10,7 @@ import { AuthClient } from '../engine/AuthClient';
 import { SoundManager } from '../engine/SoundManager';
 import { STAGES } from '../../shared/stages';
 import { I18n } from '../engine/I18n';
+import { escapeHtml } from '../engine/sanitize';
 
 interface PedestalSlot {
   heroClass: PlayerClass;
@@ -268,7 +269,7 @@ export class LobbyUI {
                     class="input-player-name"
                     maxlength="16"
                     placeholder="${I18n.t('lobby.name_placeholder')}"
-                    value="${this.playerName}"
+                    value="${escapeHtml(this.playerName)}"
                   />
                   <button id="btn-save-name" class="btn-save-name" title="บันทึกชื่อ / Save Name">SET</button>
                 </div>
@@ -279,7 +280,7 @@ export class LobbyUI {
                 <div id="party-list" class="party-list">
                   <div class="party-slot">
                     <div class="party-color" style="background: #3a86ff"></div>
-                    <div class="party-name">${this.playerName}</div>
+                    <div class="party-name">${escapeHtml(this.playerName)}</div>
                     <div class="party-class">Swordsman</div>
                     <div class="party-status not-ready">${I18n.t('lobby.status_waiting')}</div>
                   </div>
@@ -1317,7 +1318,7 @@ export class LobbyUI {
           return `
             <div class="party-slot ${isMe ? 'party-slot-me' : ''}">
               <div class="party-color" style="background: #${def.color.toString(16).padStart(6, '0')}"></div>
-              <div class="party-name">${p.name} ${isMe ? `<span class="party-you-tag">(${I18n.t('lobby.party_you')})</span>` : ''}</div>
+              <div class="party-name">${escapeHtml(p.name)} ${isMe ? `<span class="party-you-tag">(${I18n.t('lobby.party_you')})</span>` : ''}</div>
               <div class="party-class">${className}</div>
               <div class="party-status ${p.ready ? 'ready' : 'not-ready'}">${statusText}</div>
             </div>

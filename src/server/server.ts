@@ -174,6 +174,23 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
+/** The real client IP for rate-limiting. Behind nginx (see the deploy's site config),
+ * `req.socket.remoteAddress` is always 127.0.0.1 — every request looks like it comes from the
+ * same place, so isRateLimited(ip) would throttle one shared bucket for every visitor instead
+ * of one per real client. `X-Real-IP` is nginx's own view of the connecting IP ($remote_addr,
+ * not client-suppliable) so it's trustworthy; X-Forwarded-For's last hop is equivalent but only
+ * used as a fallback since earlier hops in that header can be forged by the client. */
+function getClientIp(req: http.IncomingMessage): string {
+  const realIp = req.headers['x-real-ip'];
+  if (typeof realIp === 'string' && realIp) return realIp;
+  const forwardedFor = req.headers['x-forwarded-for'];
+  if (typeof forwardedFor === 'string' && forwardedFor) {
+    const hops = forwardedFor.split(',').map((h) => h.trim());
+    return hops[hops.length - 1];
+  }
+  return req.socket.remoteAddress || 'unknown';
+}
+
 /** Reads the Bearer token from the Authorization header. Returns the authenticated user id,
  * or null (and already wrote a 401 response) if the token is missing/invalid. */
 function requireAuth(req: http.IncomingMessage, res: http.ServerResponse): number | null {
@@ -215,7 +232,7 @@ async function handleRegister(req: http.IncomingMessage, res: http.ServerRespons
 }
 
 async function handleLogin(req: http.IncomingMessage, res: http.ServerResponse) {
-  const ip = req.socket.remoteAddress || 'unknown';
+  const ip = getClientIp(req);
   if (isRateLimited(ip)) {
     return sendJson(res, 429, { success: false, error: 'Too many login attempts — try again in a minute' });
   }

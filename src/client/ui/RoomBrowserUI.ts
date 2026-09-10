@@ -1,5 +1,6 @@
 import { RoomSummary } from '../../shared/types';
 import { I18n } from '../engine/I18n';
+import { escapeHtml } from '../engine/sanitize';
 
 /** Shown for the "multiplayer" mode choice, before the hero-select lobby. The server pushes
  * a fresh ROOM_LIST on every create/join/leave/start (see server.ts's broadcastRoomList),
@@ -56,7 +57,7 @@ export class RoomBrowserUI {
       : this.rooms.map((r) => `
           <div class="room-row" data-room-id="${r.id}">
             <div class="room-row-info">
-              <span class="room-row-name">${r.hasPassword ? '🔒 ' : ''}${r.name}</span>
+              <span class="room-row-name">${r.hasPassword ? '🔒 ' : ''}${escapeHtml(r.name)}</span>
               <span class="room-row-meta">${r.playerCount}/${r.maxPlayers} ${isTh ? 'คน' : 'players'}${r.isStarted ? ` · ${isTh ? 'กำลังเล่น' : 'in progress'}` : ''}</span>
             </div>
             ${r.hasPassword ? `

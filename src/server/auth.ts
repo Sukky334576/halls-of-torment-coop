@@ -1,10 +1,9 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
-// No dotenv in this project (see server.ts's existing PARTY_CODE pattern) — set this in the
-// environment on a real deploy. Falls back to a fixed dev secret so local `npm run server`
-// keeps working with zero setup; that fallback is only safe because it never leaves this
-// process — no committed default is ever a real secret.
+// Set via .env.server on a real deploy (see server.ts's first import, ./loadEnv). Falls back
+// to a fixed dev secret so local `npm run server` keeps working with zero setup; that fallback
+// is only safe because it never leaves this process — no committed default is ever a real secret.
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-secret-set-JWT_SECRET-before-deploying';
 if (!process.env.JWT_SECRET) {
   console.warn('⚠️  JWT_SECRET not set — using an insecure development default. Set it before deploying.');
