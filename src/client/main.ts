@@ -12,6 +12,9 @@ import { ClientMessage, ServerMessage, PlayerClass, GameStateTick, ProjectileTyp
 import { MetaProgression } from './engine/MetaProgression';
 import { CLASS_DEFINITIONS } from '../shared/classes';
 import { I18n } from './engine/I18n';
+import { AuthClient } from './engine/AuthClient';
+import { AuthGateUI } from './ui/AuthGateUI';
+import { MainMenuUI, GameMode } from './ui/MainMenuUI';
 
 const DEVICE_ID_KEY = 'torment_device_id';
 
@@ -76,7 +79,7 @@ class GameApp {
   private readonly partyCode: string | undefined = new URLSearchParams(window.location.search).get('code') || undefined;
   private readonly deviceId: string = getOrCreateDeviceId();
 
-  constructor() {
+  constructor(mode: GameMode = 'multiplayer') {
     (window as any).game = this;
     const appEl = document.getElementById('app')!;
 
@@ -169,7 +172,8 @@ class GameApp {
         });
         this.send({ type: 'START_GAME', stageId });
       },
-      this.sound
+      this.sound,
+      mode
     );
 
     // Listen to custom player nickname change
@@ -728,7 +732,31 @@ class GameApp {
   };
 }
 
-// Start application
+// Start application — mandatory login gate, then a main-menu mode choice, before the
+// hero-select lobby/game itself ever becomes visible. Both "solo" and "multiplayer" use the
+// same server (see LobbyUI's mode param); this is a menu/flow gate only, no offline mode.
 window.addEventListener('DOMContentLoaded', () => {
-  (window as any).gameApp = new GameApp();
+  const appEl = document.getElementById('app')!;
+  appEl.style.display = 'none';
+
+  function showMainMenu(): void {
+    const menu = new MainMenuUI(document.body, (mode) => {
+      menu.destroy();
+      appEl.style.display = '';
+      (window as any).gameApp = new GameApp(mode);
+    });
+  }
+
+  if (AuthClient.isLoggedIn()) {
+    showMainMenu();
+  } else {
+    const gate = new AuthGateUI(document.body, async () => {
+      // A fresh login/register during this boot happens after MetaProgression's own
+      // constructor already ran (it only auto-syncs if a token already existed at module
+      // load) — sync explicitly now so the menu/lobby reflect the right account state.
+      await MetaProgression.syncFromServer();
+      gate.destroy();
+      showMainMenu();
+    });
+  }
 });

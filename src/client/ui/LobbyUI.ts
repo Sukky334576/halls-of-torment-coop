@@ -38,6 +38,10 @@ export class LobbyUI {
   public hallOfTrials: HallOfTrialsUI;
   public accountUI: AccountUI;
   private sound?: SoundManager;
+  // Both modes use the same room/server — a lone player already works fine there (see
+  // GameRoom.test.ts's solo cases). This only affects presentation: solo hides the party
+  // list (nothing to show) and skips the manual ready-up step (nothing to coordinate).
+  private mode: 'solo' | 'multiplayer' = 'multiplayer';
 
   // Real-time Multiplayer Party & Lobby State
   private connectedPlayers: { id: string; name: string; playerClass: PlayerClass; ready: boolean }[] = [];
@@ -91,13 +95,15 @@ export class LobbyUI {
     onSelectClass: (c: PlayerClass) => void,
     onReady: (ready: boolean) => void,
     onStartGame: (stageId: number) => void,
-    sound?: SoundManager
+    sound?: SoundManager,
+    mode: 'solo' | 'multiplayer' = 'multiplayer'
   ) {
     this.container = container;
     this.onSelectClass = onSelectClass;
     this.onReady = onReady;
     this.onStartGame = onStartGame;
     this.sound = sound;
+    this.mode = mode;
 
     const savedName = typeof localStorage !== 'undefined' ? localStorage.getItem('torment_player_name') : null;
     this.playerName = savedName || `Crusader_${Math.floor(Math.random() * 900 + 100)}`;
@@ -127,6 +133,12 @@ export class LobbyUI {
     this.initChamberCanvas();
     this.updateClassUI(this.selectedClass);
     this.refreshCoins();
+
+    if (this.mode === 'solo') {
+      // No one else to coordinate with — skip the manual ready-up step entirely.
+      this.isReady = true;
+      this.onReady(true);
+    }
 
     I18n.onLanguageChanged(() => {
       this.renderInitialDOM();
@@ -248,7 +260,7 @@ export class LobbyUI {
                 </div>
               </div>
 
-              <div class="lobby-party-container">
+              <div class="lobby-party-container" style="${this.mode === 'solo' ? 'display: none;' : ''}">
                 <h3>${I18n.t('lobby.party_title')}</h3>
                 <div id="party-list" class="party-list">
                   <div class="party-slot">
@@ -261,7 +273,7 @@ export class LobbyUI {
               </div>
 
               <div class="lobby-actions">
-                <button id="btn-ready" class="btn btn-ready-toggle">${this.isReady ? I18n.t('lobby.btn_ready_active') : I18n.t('lobby.btn_ready')}</button>
+                <button id="btn-ready" class="btn btn-ready-toggle" style="${this.mode === 'solo' ? 'display: none;' : ''}">${this.isReady ? I18n.t('lobby.btn_ready_active') : I18n.t('lobby.btn_ready')}</button>
                 <button id="btn-start" class="btn btn-enter-gate">${I18n.t('lobby.btn_enter_gate')}</button>
               </div>
             </div>

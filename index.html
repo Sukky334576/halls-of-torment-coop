@@ -3999,6 +3999,120 @@
       color: #ffd166;
     }
 
+    /* --- Auth gate (mandatory login/register, shown before anything else) --- */
+    .auth-gate-backdrop,
+    .main-menu-backdrop {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at top, #151d2f 0%, #05070c 85%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 500;
+    }
+
+    .auth-gate-panel,
+    .main-menu-panel {
+      background: radial-gradient(circle at top, #151d2f 0%, #0a0e18 80%);
+      border: 2px solid #2d3b55;
+      border-radius: 12px;
+      box-shadow: 0 0 60px rgba(0, 0, 0, 0.9), inset 0 0 25px rgba(255, 255, 255, 0.03);
+      padding: 32px 36px;
+      width: 90%;
+      max-width: 400px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .auth-gate-title {
+      font-family: 'Cinzel', 'Prompt', serif;
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: 2px;
+      color: #e5c158;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.9), 0 0 20px rgba(229, 193, 88, 0.25);
+      margin: 0;
+      text-align: center;
+    }
+
+    .auth-gate-subtitle {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin: -8px 0 4px;
+      text-align: center;
+    }
+
+    #auth-gate-form,
+    .main-menu-panel form {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* --- Main menu (single/multiplayer choice) --- */
+    .main-menu-welcome {
+      font-size: 0.95rem;
+      color: #cdd6e3;
+      margin: -8px 0 4px;
+    }
+
+    .main-menu-welcome strong {
+      color: #ffd166;
+    }
+
+    .main-menu-actions {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .main-menu-btn {
+      background: linear-gradient(180deg, #1b212d, #10141c);
+      border: 1px solid #4a3d28;
+      border-top: 1px solid #75603b;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-family: 'Prompt', sans-serif;
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 16px 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: all 0.15s ease;
+    }
+
+    .main-menu-btn:hover {
+      background: linear-gradient(180deg, #273042, #161c27);
+      border-color: #c5a059;
+      color: #fff1c5;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.8), 0 0 10px rgba(197, 160, 89, 0.25);
+    }
+
+    .main-menu-btn-icon {
+      font-size: 1.4rem;
+    }
+
+    .main-menu-logout {
+      background: none;
+      border: none;
+      color: #64748b;
+      font-size: 0.76rem;
+      cursor: pointer;
+      text-decoration: underline;
+      margin-top: 4px;
+    }
+
+    .main-menu-logout:hover {
+      color: #94a3b8;
+    }
+
     /* --- RARITY THEMING --- */
     .rarity-common {
       border-color: #64748b !important;
