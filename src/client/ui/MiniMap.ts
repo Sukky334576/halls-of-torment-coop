@@ -22,6 +22,9 @@ export class MiniMap {
   // (cx, cy, rimRadius) never change either — build it once instead of every update()
   // call (20-25Hz), which was previously reallocating a gradient every single tick.
   private cachedBgGrad: CanvasGradient | null = null;
+  // Same reasoning as cachedBgGrad above — the brass ring's gradient only depends on the
+  // canvas's own fixed w/h, so it was another gradient being needlessly rebuilt every tick.
+  private cachedRingGrad: CanvasGradient | null = null;
 
   constructor(parent: HTMLElement) {
     this.container = document.createElement('div');
@@ -481,12 +484,15 @@ export class MiniMap {
     // 8. Gothic Ornate Brass Compass Frame Ring
     ctx.save();
     // Outer brass border
-    const ringGrad = ctx.createLinearGradient(0, 0, w, h);
-    ringGrad.addColorStop(0, '#d4af37');
-    ringGrad.addColorStop(0.5, '#785918');
-    ringGrad.addColorStop(1, '#b8860b');
+    if (!this.cachedRingGrad) {
+      const ringGrad = ctx.createLinearGradient(0, 0, w, h);
+      ringGrad.addColorStop(0, '#d4af37');
+      ringGrad.addColorStop(0.5, '#785918');
+      ringGrad.addColorStop(1, '#b8860b');
+      this.cachedRingGrad = ringGrad;
+    }
 
-    ctx.strokeStyle = ringGrad;
+    ctx.strokeStyle = this.cachedRingGrad;
     ctx.lineWidth = 3.5;
     ctx.beginPath();
     ctx.arc(cx, cy, rimRadius, 0, Math.PI * 2);

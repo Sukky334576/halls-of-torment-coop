@@ -30,6 +30,20 @@ export class LobbyUI {
 
   private selectedClass: PlayerClass = PlayerClass.SWORDSMAN;
   private hoveredClass: PlayerClass | null = null;
+  // drawChamberBackground()'s scene-geometry gradients (wall ambient, dais, shadows, floor)
+  // don't depend on `time` at all — same inputs every frame — but were being rebuilt from
+  // scratch every single frame of the lobby's own requestAnimationFrame loop regardless.
+  // Cached here and invalidated only if the canvas is resized (see the w/h check at use).
+  private cachedBgGradients: {
+    w: number;
+    h: number;
+    wallAmbient: CanvasGradient;
+    dais: CanvasGradient;
+    leftShadow: CanvasGradient;
+    rightShadow: CanvasGradient;
+    floor: CanvasGradient;
+    floorAura: CanvasGradient;
+  } | null = null;
   private isReady: boolean = false;
   private playerName: string = '';
   public onNameChange: ((newName: string) => void) | null = null;
@@ -586,19 +600,45 @@ export class LobbyUI {
       }
     }
 
+    // Build once per canvas size instead of every frame — see cachedBgGradients' field
+    // comment. Only geometry changes with w/h; the colors themselves are always the same.
+    if (!this.cachedBgGradients || this.cachedBgGradients.w !== w || this.cachedBgGradients.h !== h) {
+      const wallAmbient = ctx.createRadialGradient(this.gateX, this.gateY + 20, 40, this.gateX, this.gateY + 20, 420);
+      wallAmbient.addColorStop(0, 'rgba(255, 150, 50, 0.08)');
+      wallAmbient.addColorStop(0.6, 'rgba(180, 80, 20, 0.03)');
+      wallAmbient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+      const dais = ctx.createLinearGradient(0, 210, 0, 295);
+      dais.addColorStop(0, '#131826');
+      dais.addColorStop(1, '#1a2233');
+
+      const leftShadow = ctx.createLinearGradient(0, 295, 583, 295);
+      leftShadow.addColorStop(0, 'rgba(8, 11, 17, 0.55)');
+      leftShadow.addColorStop(1, 'rgba(8, 11, 17, 0.05)');
+
+      const rightShadow = ctx.createLinearGradient(w, 295, 1018, 295);
+      rightShadow.addColorStop(0, 'rgba(8, 11, 17, 0.55)');
+      rightShadow.addColorStop(1, 'rgba(8, 11, 17, 0.05)');
+
+      const floor = ctx.createLinearGradient(0, 330, 0, h);
+      floor.addColorStop(0, '#141a27');
+      floor.addColorStop(0.4, '#1b2234');
+      floor.addColorStop(1, '#0c1017');
+
+      const floorAura = ctx.createRadialGradient(w / 2, 430, 80, w / 2, 430, 480);
+      floorAura.addColorStop(0, 'rgba(40, 56, 85, 0.22)');
+      floorAura.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+      this.cachedBgGradients = { w, h, wallAmbient, dais, leftShadow, rightShadow, floor, floorAura };
+    }
+    const bgGrad = this.cachedBgGradients;
+
     // Wall torchlight ambient warmth
-    const wallAmbient = ctx.createRadialGradient(this.gateX, this.gateY + 20, 40, this.gateX, this.gateY + 20, 420);
-    wallAmbient.addColorStop(0, 'rgba(255, 150, 50, 0.08)');
-    wallAmbient.addColorStop(0.6, 'rgba(180, 80, 20, 0.03)');
-    wallAmbient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = wallAmbient;
+    ctx.fillStyle = bgGrad.wallAmbient;
     ctx.fillRect(0, 0, w, 210);
 
     // 3. Elevated Dais / Balcony for Back-Tier Heroes (y: 210 -> 295)
-    const daisGrad = ctx.createLinearGradient(0, 210, 0, 295);
-    daisGrad.addColorStop(0, '#131826');
-    daisGrad.addColorStop(1, '#1a2233');
-    ctx.fillStyle = daisGrad;
+    ctx.fillStyle = bgGrad.dais;
     ctx.fillRect(0, 210, w, 85);
 
     // Dais stone trim cornice at top (y: 208 -> 214)
@@ -648,24 +688,14 @@ export class LobbyUI {
     });
 
     // Shadowing on dais wings (behind front heroes) for smooth atmospheric depth
-    const leftShadow = ctx.createLinearGradient(0, 295, 583, 295);
-    leftShadow.addColorStop(0, 'rgba(8, 11, 17, 0.55)');
-    leftShadow.addColorStop(1, 'rgba(8, 11, 17, 0.05)');
-    ctx.fillStyle = leftShadow;
+    ctx.fillStyle = bgGrad.leftShadow;
     ctx.fillRect(0, 295, 583, 35);
 
-    const rightShadow = ctx.createLinearGradient(w, 295, 1018, 295);
-    rightShadow.addColorStop(0, 'rgba(8, 11, 17, 0.55)');
-    rightShadow.addColorStop(1, 'rgba(8, 11, 17, 0.05)');
-    ctx.fillStyle = rightShadow;
+    ctx.fillStyle = bgGrad.rightShadow;
     ctx.fillRect(1018, 295, w - 1018, 35);
 
     // 5. Grand Foreground Sanctuary Floor (y: 330 -> 540)
-    const floorGrad = ctx.createLinearGradient(0, 330, 0, h);
-    floorGrad.addColorStop(0, '#141a27');
-    floorGrad.addColorStop(0.4, '#1b2234');
-    floorGrad.addColorStop(1, '#0c1017');
-    ctx.fillStyle = floorGrad;
+    ctx.fillStyle = bgGrad.floor;
     ctx.fillRect(0, 330, w, h - 330);
 
     // Flagstone horizontal joints
@@ -687,10 +717,7 @@ export class LobbyUI {
     }
 
     // Grand foreground ambient lighting pool
-    const floorAura = ctx.createRadialGradient(w / 2, 430, 80, w / 2, 430, 480);
-    floorAura.addColorStop(0, 'rgba(40, 56, 85, 0.22)');
-    floorAura.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = floorAura;
+    ctx.fillStyle = bgGrad.floorAura;
     ctx.fillRect(0, 330, w, h - 330);
   }
 
