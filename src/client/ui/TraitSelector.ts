@@ -25,7 +25,6 @@ export class TraitSelector {
   private container: HTMLElement;
   private onSelect: (id: string) => void;
   private onUsePotion?: (action: 'REROLL' | 'BANISH' | 'LOCK', traitId?: string) => void;
-  private pendingQueue: { choices: TraitChoiceView[]; potions?: PotionState }[] = [];
   public isShowing: boolean = false;
 
   private currentChoices: TraitChoiceView[] = [];
@@ -42,12 +41,12 @@ export class TraitSelector {
     this.onUsePotion = onUsePotion;
   }
 
+  // Every server-initiated LEVEL_UP_CHOICE call that can arrive while isShowing is already
+  // true is a Reroll/Banish refresh of THIS same still-open pick (a genuinely new, unrelated
+  // level-up is queued server-side in GameRoom's pendingLevelUpChoices and only re-sent after
+  // the client has already closed this modal) — so always replace what's on screen immediately
+  // rather than queuing, or a reroll/banish response silently never gets shown.
   public showChoices(choices: TraitChoiceView[], potions?: PotionState): void {
-    if (this.isShowing) {
-      this.pendingQueue.push({ choices, potions });
-      return;
-    }
-
     this.isShowing = true;
     this.currentChoices = choices;
     if (potions) {
@@ -59,17 +58,15 @@ export class TraitSelector {
     this.render();
   }
 
-  /** Force-closes an open (or queued) trait pick — needed for GAME_OVER/SURRENDER while a
-   * level-up choice happens to be on screen. Without this, the modal's own inline
-   * `display: flex` (set in render()) just stays put — the match-end handler previously only
-   * cleared the `trait-modal-open` body class, which doesn't touch the modal element itself —
-   * so the defeat/victory screen underneath was rendered but never actually visible. Also
-   * drops any still-queued choices so they can't reappear at the start of the next match. */
+  /** Force-closes an open trait pick — needed for GAME_OVER/SURRENDER while a level-up choice
+   * happens to be on screen. Without this, the modal's own inline `display: flex` (set in
+   * render()) just stays put — the match-end handler previously only cleared the
+   * `trait-modal-open` body class, which doesn't touch the modal element itself — so the
+   * defeat/victory screen underneath was rendered but never actually visible. */
   public hide(): void {
     const modal = this.container.querySelector('#trait-modal') as HTMLElement | null;
     if (modal) modal.style.display = 'none';
     this.isShowing = false;
-    this.pendingQueue = [];
     this.activeMode = 'NONE';
     document.body.classList.remove('trait-modal-open');
   }
@@ -226,18 +223,8 @@ export class TraitSelector {
         // Standard selection
         modal.style.display = 'none';
         this.isShowing = false;
-        if (this.pendingQueue.length === 0) {
-          document.body.classList.remove('trait-modal-open');
-        }
+        document.body.classList.remove('trait-modal-open');
         this.onSelect(id);
-
-        // If queued level-ups remain, show next
-        if (this.pendingQueue.length > 0) {
-          const next = this.pendingQueue.shift()!;
-          setTimeout(() => {
-            this.showChoices(next.choices, next.potions);
-          }, 200);
-        }
       });
     });
   }
