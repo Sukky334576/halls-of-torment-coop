@@ -424,18 +424,19 @@
       gap: 5px;
       min-width: 0;
       box-shadow: 0 4px 12px rgba(0,0,0,0.6);
-    }
-
-    /* Below ~1000px the hero name/description wrap onto a different number of lines
-       per hero, so the card's natural height varies as you click between pedestals —
-       visible as the whole lobby panel "bouncing" taller/shorter. A floor sized to the
-       tallest real combo (measured ~320px at narrow widths) keeps it stable. Left
-       unset above this breakpoint since nothing wraps there and the floor would just
-       add dead space below an already-comfortable card. */
-    @media (max-width: 1000px) {
-      .hero-inspector-card {
-        min-height: 320px;
-      }
+      /* Two independent causes make this card's natural height vary as you click between
+         pedestals — the whole lobby panel visibly "bounces" taller/shorter otherwise:
+         (1) below ~1000px the hero name/description wrap onto a different number of lines
+         per hero; (2) at ANY width, clicking a locked hero adds the unlock-requirement +
+         buy-button banner (#hero-unlock-container), which is ~76px taller than a hero with
+         no banner even on a full desktop width (measured 186px unlocked vs 262px locked at
+         1920px). This used to only apply below 1000px, back when every hero was unlocked
+         for testing and the banner path was never actually exercised — restoring the real
+         unlock gate exposed the desktop-width case too. 320px was already tall enough to
+         cover the narrow-width locked-hero-with-banner combo (measured 318px content, no
+         overflow), so it comfortably covers the desktop one too — just needed to stop being
+         narrow-only. */
+      min-height: 320px;
     }
 
     .inspector-header {
