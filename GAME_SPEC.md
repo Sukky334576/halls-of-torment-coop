@@ -28,6 +28,8 @@ halls-of-torment-coop/
 ├── package.json               # Dependencies (Three.js, ws, vite, typescript, etc.)
 ├── tsconfig.json              # TypeScript compiler configuration
 ├── vite.config.ts             # Vite frontend bundler config
+├── ecosystem.config.cjs       # pm2 process definition for production (see §8.3, §13)
+├── .env.server.example        # Template for the gitignored .env.server (JWT_SECRET, PARTY_CODE)
 ├── run-game.bat               # 1-Click launcher script (Windows: Client + Server + Tunnel)
 ├── GAME_SPEC.md               # Complete game documentation & developer handbook
 ├── src/
@@ -41,7 +43,10 @@ halls-of-torment-coop/
 │   │   ├── constants.ts       # Shared tunable gameplay constants
 │   │   └── i18n data lives in src/client/engine/I18n.ts (client-only, see below)
 │   ├── server/                # Authoritative Node.js WebSocket Game Engine
-│   │   ├── server.ts          # WebSocket & HTTP server, connection manager, GM API
+│   │   ├── loadEnv.ts         # First import in server.ts — loads .env.server before anything else (see §8.3, §13)
+│   │   ├── server.ts          # WebSocket & HTTP server, connection manager, room registry, GM API
+│   │   ├── auth.ts            # bcrypt hashing, JWT sign/verify, login/register rate limiting
+│   │   ├── db.ts              # SQLite (better-sqlite3) — users & progression tables
 │   │   ├── benchmark.ts       # Server-side perf benchmarking harness
 │   │   ├── entities/
 │   │   │   ├── ServerPlayer.ts# Authoritative player state & stat recalculation
@@ -61,6 +66,8 @@ halls-of-torment-coop/
 │       │   ├── GraphicsSettings.ts# Low/Medium/High render-quality setting (localStorage), cycled from EscMenuUI
 │       │   ├── I18n.ts        # Bilingual Thai & English dictionary + language switching
 │       │   ├── MetaProgression.ts# LocalStorage persistence (coins, unlocks, vault)
+│       │   ├── AuthClient.ts  # Register/login HTTP calls, JWT storage (see §8.3)
+│       │   ├── sanitize.ts    # escapeHtml() — required before any user-controlled name reaches innerHTML (see §13)
 │       │   └── SoundManager.ts# Web Audio API synthesizers & sound effects
 │       ├── entities/
 │       │   ├── PlayerMesh.ts  # 3D player representation
@@ -68,6 +75,10 @@ halls-of-torment-coop/
 │       │   ├── VFX2D.ts       # 2D Canvas projectiles, shockwaves, laser beams, winds
 │       │   └── VisualEffects.ts# 3D meshes & glowing particle systems
 │       └── ui/
+│           ├── AuthGateUI.ts  # Mandatory login/register screen — blocks everything until authenticated
+│           ├── MainMenuUI.ts  # Post-login solo/multiplayer choice
+│           ├── RoomBrowserUI.ts# Public room list — create/join, optional password (see §8.4)
+│           ├── AccountUI.ts   # Account panel (logged-in-as, logout) reachable from the lobby
 │           ├── LobbyUI.ts     # Character selector, party lobby, ready buttons
 │           ├── HUD.ts         # Player health, team status, damage numbers
 │           ├── MiniMap.ts     # In-run minimap
@@ -79,7 +90,7 @@ halls-of-torment-coop/
 └── scratch/                   # Developer tools, CLI airdrop scripts, Puppeteer e2e tests
 ```
 
-> Directory tree audited against the actual source tree on 2026-09-09 — update this section whenever files are added, renamed, or removed so it doesn't drift again.
+> Directory tree audited against the actual source tree on 2026-09-10 — update this section whenever files are added, renamed, or removed so it doesn't drift again.
 
 ---
 
@@ -174,7 +185,7 @@ The Skill Tree is modeled after the *Path of Exile* constellation web:
 - **Tick Rate**: **25 Hz (40ms per tick)**, see `GAME_CONSTANTS.SERVER_TICK_RATE`/`SERVER_TICK_MS` in `constants.ts`.
 - **Authoritative Simulation**: Monster health, movement, knockbacks, item drops, and cooldowns are calculated strictly on the server to prevent cheating or desync.
 - **Spatial Hash Grid**: `SpatialGrid.ts` partitions the $4,500 \times 4,500$ map into $150\text{px}$ cells (`GAME_CONSTANTS.SPATIAL_CELL_SIZE`), enabling $O(1)$ collision and radius checks. Measured live: at the documented worst case (4 players, 740 monsters — the `HordeDirector.ts` cap of `380 + (playerCount-1)*120` — plus 150 projectiles), a full `tick()` averages **~0.9ms** (worst observed ~4.4ms) against the 40ms budget, and the resulting JSON payload is **~78KB/tick/client** (~1.9MB/s at 25Hz) since WebSocket compression (`perMessageDeflate`) is not currently enabled.
-- **Single-room design**: `server.ts` holds one global `currentRoom` — the server hosts exactly one active match (up to 4 players) at a time, not a multi-tenant matchmaking backend.
+- **Multi-room design** (updated 2026-09-10, was single-room): `server.ts` holds a `Map<string, RoomEntry>` — the server hosts many concurrent rooms (each up to 4 players), not just one active match. See §8.4.
 
 ### 8.1.1 Reliability: Reconnect & Party Codes
 - **Device identity**: the client generates a persistent `deviceId` (`localStorage: torment_device_id`, `main.ts`) independent of the WebSocket connection, used as the player's key inside `GameRoom` instead of the ephemeral per-connection id.
@@ -193,6 +204,18 @@ GET /api/grant-gold?amount=35000
   ```
 - **Feedback**: Displays a golden toast notification on the client lobby and floats gold numbers above characters in-game.
 
+### 8.3 Player Accounts (added 2026-09-10)
+- **Storage**: SQLite via `better-sqlite3` (`src/server/db.ts`) — two tables, `users` (id, username, `password_hash`, created_at) and `progression` (user_id, JSON `data` blob, updated_at). File picked by `NODE_ENV`: `data/game.dev.db` in development, `data/game.db` in production.
+- **Auth**: `src/server/auth.ts` — passwords hashed with `bcryptjs` (10 rounds); sessions are a JWT (`HS256`, algorithm pinned explicitly on both sign and verify — see §13), 30-day expiry, signed with `JWT_SECRET`. Loaded from a gitignored `.env.server` via `src/server/loadEnv.ts` (named `.env.server`, not `.env`, specifically so Vite's client build never scans it and risks inlining a secret into the browser bundle).
+- **HTTP endpoints**: `POST /api/register`, `POST /api/login` (both rate-limited per-IP, see §13), `GET`/`POST /api/progression` (Bearer-token authed, syncs `MetaProgression`'s save data).
+- **Client flow**: login is mandatory — `AuthGateUI` blocks everything until authenticated (no guest mode), then `MainMenuUI` offers solo/multiplayer. `AuthClient.ts` stores the token in `localStorage`.
+
+### 8.4 Multi-Room Lobby System (added 2026-09-10)
+- **Rooms**: `rooms: Map<string, RoomEntry>` in `server.ts` — each `RoomEntry` wraps a `GameRoom` plus `name`, `hostName`, and an optional plaintext `password` (a lightweight room passcode shared between friends, not an account credential — never sent back to clients, only `hasPassword: boolean` is). Solo mode silently `CREATE_ROOM`s for the player with no browser; multiplayer shows `RoomBrowserUI`, a public list of every open room (`LIST_ROOMS`/`ROOM_LIST`, pushed automatically on every create/join/leave/start).
+- **Room naming**: default name is `Room #<n>` (a counter), not derived from the host's player name, so renaming your character doesn't imply anything about who owns a room.
+- **Capacity/DoS limits** (added alongside a security pass, see §13): `MAX_ROOMS = 100` total concurrent rooms server-wide; room name/password/player name/deviceId are length-capped server-side (a raw WS client bypasses the real UI's input `maxlength` entirely).
+- **Lifecycle**: a room is deleted and `broadcastRoomList()`'d the moment its last player leaves (`GameRoom`'s existing `onEmpty` callback) — if the host leaves, the room simply continues for whoever's left; there's no host migration logic because there's no host-only capability to migrate.
+
 ---
 
 ## 9. Developer Quick-Start Guide (For Handover)
@@ -206,22 +229,37 @@ GET /api/grant-gold?amount=35000
    ```bash
    npm install
    ```
-2. **Start Game Server** (WebSocket & GM API on port 8080):
+2. **Configure secrets** (required since accounts were added — see §8.3):
+   ```bash
+   cp .env.server.example .env.server
+   # fill in JWT_SECRET; see the comment in .env.server.example for how to generate one
+   ```
+3. **Start Game Server** (WebSocket, HTTP auth API, and GM API on port 8080):
    ```bash
    npm run server
    # or: npx tsx src/server/server.ts
    ```
-3. **Start Client Dev Server** (Vite on port 3000):
+4. **Start Client Dev Server** (Vite on port 3000):
    ```bash
    npm run dev
    # or: npx vite --port 3000
    ```
-4. **Build Production Bundle**:
+   Login is mandatory now (no guest mode) — register an account on first load.
+5. **Build Production Bundle**:
    ```bash
    npm run build
    ```
-5. **One-Click Launch (Windows)**:
+6. **One-Click Launch (Windows)**:
    Double-click `run-game.bat` to launch Vite, the Game Server, and Cloudflare Tunnel concurrently!
+
+### 9.3 Production Deploy
+Run via the tracked pm2 config rather than a manual `pm2 start` — see the caution note in §13 about why:
+```bash
+npm run build
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+`ecosystem.config.cjs` sets `NODE_ENV=production` (picks `game.db` over `game.dev.db`, §8.3); `.env.server` on the deploy box supplies `JWT_SECRET`/`PARTY_CODE`. To pick up a code change afterward, `pm2 restart game-server` is enough — no need to delete/recreate the process.
 
 ---
 
@@ -246,7 +284,7 @@ GET /api/grant-gold?amount=35000
 ## 11. Co-op Gold Economy & Trait Power Tiers
 
 ### 11.1 Personal Gold Wallets
-Gold is **per-player, not a shared team pool**: `ServerPlayer.gold` credits whoever actually collects a `GOLD_COIN` or `TREASURE_CHEST` pickup (`handlePickupCollection()` in `GameRoom.ts`). A run's `GAME_OVER` payload reports `personalGold` (this player's own collected total) separately from a small leftover `teamGold`/`playerCount` bucket (server-granted airdrops, starting gift) that's still split evenly across the party. EXP remains fully shared team-wide regardless of who lands the kill.
+Gold is **per-player, not a shared team pool**: `ServerPlayer.gold` credits whoever actually collects a `GOLD_COIN` or `TREASURE_CHEST` pickup (`handlePickupCollection()` in `GameRoom.ts`). A run's `GAME_OVER` payload reports `personalGold` (this player's own collected total) separately from a `teamGold`/`playerCount` bucket split evenly across the party — `teamGold` starts at **0** every match (fixed 2026-09-10; it used to seed 35,000 as a "starting gift", silently handing out free gold every single run) and only grows via `grantBonusGold()`, the `/api/grant-gold` GM command. EXP remains fully shared team-wide regardless of who lands the kill.
 
 ### 11.2 Power Tiers (S/A/B/C/D)
 Every trait card's `rarity` maps 1:1 to a power tier via `getPowerTier()` in `classes.ts`:
@@ -267,6 +305,20 @@ A low-chance (`GAME_CONSTANTS.MAGNET_DROP_CHANCE`, 1.5% per kill) pickup that, w
 ## 12. Performance & Graphics Quality
 - **Server**: broadcast payload is serialized once per room per tick (§8.1); `VFX2D.ts` avoids `ctx.shadowBlur`/regenerated gradients on the highest-frequency draws (EXP gems, gold coins); `MiniMap.ts` caches its background radial gradient instead of rebuilding it every frame.
 - **Client Graphics Quality setting** (`GraphicsSettings.ts`, cycled from the ESC menu footer): Low/Medium/High presets scale the Canvas2D backing-buffer resolution (`dprCap` × `renderScale`) live, no reload required. **Medium is the default and matches pre-setting behavior exactly** (dprCap 1.5, renderScale 1.0), so existing play is unaffected unless a player opts into Low (dprCap 1.0 × 0.75 — roughly half the pixels to fill, reads as a deliberate retro pixel-art look since the canvas already renders with `image-rendering: pixelated`) or High (dprCap 2.0, for crisper output on high-DPI displays with headroom to spare).
+
+---
+
+## 13. Security Hardening (2026-09-10 audit + fixes)
+
+A 3-part audit (host VPS, server code, client code) plus follow-up fixes closed several real, exploitable gaps. Kept here so the reasoning isn't lost — don't casually revert any of these without re-reading why.
+
+- **Client-controlled name/room-name XSS**: `RoomBrowserUI`, `LobbyUI`, `HUD`, and `EscMenuUI` all interpolated a player's display name or a room's name into `innerHTML` unescaped. Unlike account usernames (regex-gated `[a-zA-Z0-9_]{3,20}` at registration), display names and room names have no character restriction — a crafted name ran arbitrary script in every other viewer's browser, able to read the JWT out of `localStorage`. Fixed via `src/client/engine/sanitize.ts`'s `escapeHtml()`, applied everywhere a server-sourced name reaches `innerHTML`.
+- **Login rate limiter was a single shared bucket, not per-client**: it keyed on `req.socket.remoteAddress`, which behind nginx is always `127.0.0.1` — every visitor shared one throttle, so a handful of failed logins from anyone locked out login for everyone. Fixed by reading `X-Real-IP` (nginx's own view of the connection, not client-suppliable) with an `X-Forwarded-For`-last-hop fallback. `/api/register` had no rate limit at all — added one, namespaced separately from login's so the two don't drain each other's allowance.
+- **WS/HTTP abuse surface**: free-text WS fields (name/roomName/password/deviceId) had no length cap server-side (a raw client bypasses the real UI's `maxlength`) and got re-broadcast on every lobby-state update; `WebSocketServer` had no `maxPayload` (the `ws` library default is 100MB); nothing capped concurrent rooms. Fixed with explicit length caps, `maxPayload: 32KB`, and `MAX_ROOMS = 100` (§8.4). **Caution if touching `maxPayload` again**: it requires a `ws.on('error', ...)` listener on every connection — an 'error' event with none crashes the whole Node process, which is exactly what an oversized-frame rejection fires.
+- **JWT algorithm not pinned**: `jwt.verify()` trusted library defaults instead of explicitly requiring `HS256`. Not currently exploitable (no asymmetric key exists to enable classic algorithm-confusion), but pinned as defense-in-depth — `signToken`/`verifyToken` in `auth.ts` both specify `algorithm`/`algorithms` now.
+- **Unhandled promise rejections could kill the process**: the progression HTTP handlers and a TOCTOU race in `/api/register` (two concurrent registrations for the same username could both pass the pre-check) threw without being caught, and Node terminates on unhandled rejections by default. Wrapped via a `safeHandler()` helper returning a generic 500, plus an explicit `SQLITE_CONSTRAINT` catch in register.
+- **Host (Contabo VPS)**: SSH password auth was actually enabled (two conflicting `sshd_config.d` drop-ins; the wrong one won) with a usable root password and no fail2ban — now `PasswordAuthentication no` / `PermitRootLogin prohibit-password` via a drop-in that sorts first. The Node process listened on the wildcard address, one firewall misconfiguration away from bypassing nginx entirely — now bound to `127.0.0.1` explicitly (override with `HOST` env if a deploy genuinely needs otherwise). `data/game.db*` tightened from `644` to `600`. nginx: added `X-Content-Type-Options`/`X-Frame-Options`, hid the version string (`server_tokens off`), and added `limit_req` zones (`api_zone` 5r/s on `/api/`, `general_zone` 20r/s on `/ws`). **Caution**: don't put `limit_req` on the static-file `location /` — sprite assets legitimately burst dozens of parallel requests on page load and this broke real gameplay the first time it was tried.
+- **Deliberately left open**: `/api/grant-gold` still has no auth (an explicit, accepted GM command for friend-testing — don't "fix" this without asking), locking root's password entirely, splitting the game-server process off root into its own user, and TLS (needs a domain name first, currently IP-only).
 
 ---
 *Created and maintained with Antigravity AI — Built for limitless dark fantasy co-op survival.*
