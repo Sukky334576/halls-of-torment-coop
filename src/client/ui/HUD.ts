@@ -15,6 +15,12 @@ interface ActiveFloatingText {
   age: number; // 0 to 1
 }
 
+// A burst kill (AoE clearing a pack) spawns one damage number per monster in the same tick,
+// all first-rendered on the same frame — with no cap, that's an unbounded stutter spike
+// exactly when a lot of enemies (and their drops) appear at once. Bounding this trims the
+// oldest excess rather than dropping the newest, so a burst never shows a half-finished set.
+const MAX_FLOATING_TEXTS = 60;
+
 export class HUD {
   private container: HTMLElement;
   private canvas: HTMLCanvasElement;
@@ -471,6 +477,9 @@ export class HUD {
         age: 0
       });
     }
+    if (this.floatingTexts.length > MAX_FLOATING_TEXTS) {
+      this.floatingTexts.splice(0, this.floatingTexts.length - MAX_FLOATING_TEXTS);
+    }
 
     // 5. Render floating damage numbers and offscreen revive indicators on 2D canvas
     this.renderFloatingNumbers(camera, players, localPlayerId);
@@ -629,13 +638,22 @@ export class HUD {
           this.ctx.strokeText(`CRIT! ${text.amount}`, screenX, screenY);
           this.ctx.fillText(`CRIT! ${text.amount}`, screenX, screenY);
         } else {
+          // This is the by-far-most-common case — one of these per hit, and a burst kill
+          // (AoE clearing a pack) spawns a dozen-plus in the same frame. strokeText is
+          // markedly more expensive than fillText (it builds glyph outline geometry to
+          // stroke rather than just rasterizing the fill), and paying that per number was a
+          // real, measured stutter right when a lot of enemies died/dropped loot at once. A
+          // small shadow reads as an outline at this font size for a fraction of the cost —
+          // see the EXP-gem/gold-coin comments above for the same shadowBlur-cost lesson
+          // applied in reverse (small radius here, not skipped entirely, since legibility
+          // against bright backgrounds still matters for a number this size).
           this.ctx.fillStyle = text.color || '#f8f9fa';
-          this.ctx.strokeStyle = '#000000';
-          this.ctx.lineWidth = 2;
+          this.ctx.shadowColor = '#000000';
+          this.ctx.shadowBlur = 3;
           this.ctx.font = 'bold 16px "Cinzel", sans-serif';
           this.ctx.textAlign = 'center';
-          this.ctx.strokeText(`${text.amount}`, screenX, screenY);
           this.ctx.fillText(`${text.amount}`, screenX, screenY);
+          this.ctx.shadowBlur = 0;
         }
       }
 
