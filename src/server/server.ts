@@ -391,9 +391,15 @@ const server = http.createServer((req, res) => {
 // Default maxPayload is 100MB — real messages here (input/room/chat control packets) are all
 // tiny, so cap it hard rather than let one client send an oversized frame to spike memory.
 const wss = new WebSocketServer({ server, maxPayload: 32 * 1024 });
-server.listen(PORT, () => {
+// nginx (or Vite's dev proxy) is always the actual public entry point — this process only
+// ever needs to be reachable from the same machine. Binding the wildcard address (Node's
+// default with no host argument) meant a firewall misconfiguration was the only thing standing
+// between the raw, unproxied WS/API and the internet. Override with HOST if a real deploy
+// setup needs otherwise.
+const HOST = process.env.HOST || '127.0.0.1';
+server.listen(PORT, HOST, () => {
   const mode = IS_PRODUCTION ? 'production' : 'development';
-  console.log(`🗡️ [Torment of Souls] Dedicated Game Server running on port ${PORT} (${mode} mode)`);
+  console.log(`🗡️ [Torment of Souls] Dedicated Game Server running on ${HOST}:${PORT} (${mode} mode)`);
 });
 
 function sendToClient(id: string, msg: ServerMessage) {
