@@ -47,6 +47,12 @@ class GameApp {
   private ws!: WebSocket;
   private myId: string = '';
   private isGameRunning: boolean = false;
+  // Only tracked so input-driven actions (currently just Dash) can check it — tick-driven
+  // sounds (attacks, pickups, hits) already stop correctly on their own once paused, since
+  // the server re-broadcasts the same frozen tick and nothing changes to trigger them. Dash
+  // is different: it plays its sound and sends DASH straight from the keypress handler, with
+  // no tick data in between to naturally gate it.
+  private isPaused: boolean = false;
   private autoAim: boolean = false;
 
   private renderer: Renderer2D;
@@ -144,6 +150,7 @@ class GameApp {
       this.send({ type: 'SURRENDER' });
     };
     this.escMenu.onPauseToggle = (isPaused: boolean) => {
+      this.isPaused = isPaused;
       this.send({ type: 'PAUSE_GAME', isPaused });
     };
 
@@ -244,7 +251,7 @@ class GameApp {
   }
 
   public performDash(): void {
-    if (!this.isGameRunning) return;
+    if (!this.isGameRunning || this.isPaused) return;
     const me = this.latestTick?.players.find((p) => p.id === this.myId);
     if (!me || me.isDead || (me.dashCooldownRemaining !== undefined && me.dashCooldownRemaining > 0)) return;
 
@@ -570,6 +577,7 @@ class GameApp {
 
           case 'GAME_OVER': {
             this.isGameRunning = false;
+            this.isPaused = false;
             this.escMenu.hide();
             this.traits.hide(); // also clears the trait-modal-open body class
             document.body.classList.remove('in-game');
