@@ -23,13 +23,17 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
   return bcrypt.compare(plain, hash);
 }
 
+const JWT_ALGORITHM = 'HS256';
+
 export function signToken(userId: number): string {
-  return jwt.sign({ uid: userId }, JWT_SECRET, { expiresIn: TOKEN_TTL });
+  return jwt.sign({ uid: userId }, JWT_SECRET, { expiresIn: TOKEN_TTL, algorithm: JWT_ALGORITHM });
 }
 
 export function verifyToken(token: string): { uid: number } | null {
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
+    // Pin the algorithm explicitly rather than trusting the token's own `alg` header — jwt.sign
+    // above only ever produces HS256, so there's no legitimate reason to accept anything else.
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALGORITHM] });
     if (typeof payload === 'object' && typeof payload.uid === 'number') {
       return { uid: payload.uid };
     }

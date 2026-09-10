@@ -2,6 +2,7 @@ import { GameStateTick, PlayerNetworkData, PlayerClass, ShrineType } from '../..
 import { CLASS_DEFINITIONS, TRAIT_POOL } from '../../shared/classes';
 import { I18n } from '../engine/I18n';
 import { SoundManager } from '../engine/SoundManager';
+import { escapeHtml } from '../engine/sanitize';
 import { GraphicsSettings, GraphicsQuality } from '../engine/GraphicsSettings';
 
 export class EscMenuUI {
@@ -544,7 +545,7 @@ export class EscMenuUI {
             <div class="esc-party-row ${p.isDead ? 'dead' : ''}">
               <div class="party-col-user">
                 <span class="user-avatar">${this.getClassAvatar(p.playerClass)}</span>
-                <span class="user-name">${p.name || 'Crusader'} ${isYou ? (isTh ? '(คุณ)' : '(You)') : ''}</span>
+                <span class="user-name">${escapeHtml(p.name || 'Crusader')} ${isYou ? (isTh ? '(คุณ)' : '(You)') : ''}</span>
               </div>
               <div class="party-col-class">${className} (Lv.${p.level})</div>
               <div class="party-col-hp">

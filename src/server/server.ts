@@ -53,6 +53,16 @@ interface RoomEntry {
   password: string | null;
 }
 const MAX_PLAYERS_PER_ROOM = 4;
+// A raw WS client bypasses any maxlength on the real UI's inputs entirely, so these need
+// enforcing here — otherwise an oversized name/room name gets re-broadcast to everyone in
+// LOBBY_STATE/ROOM_LIST on every ready-toggle/join/leave, a cheap bandwidth/CPU amplification.
+const MAX_NAME_LENGTH = 32;
+const MAX_ROOM_NAME_LENGTH = 40;
+const MAX_ROOM_PASSWORD_LENGTH = 64;
+const MAX_DEVICE_ID_LENGTH = 128;
+// Each started room runs its own tick-loop simulation (SpatialGrid, HordeDirector) — without
+// a ceiling, one client could open many connections and spin up unbounded live simulations.
+const MAX_ROOMS = 100;
 const rooms: Map<string, RoomEntry> = new Map();
 let nextRoomId = 1;
 
@@ -174,6 +184,22 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
+/** These handlers are `async` but called without `await`/`.catch()` below — an unhandled
+ * rejection (e.g. a DB error) would otherwise crash the whole process (Node terminates on
+ * unhandled rejections by default). Wraps any of them into a generic 500 instead. */
+function safeHandler(
+  fn: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>
+): (req: http.IncomingMessage, res: http.ServerResponse) => void {
+  return (req, res) => {
+    fn(req, res).catch((err) => {
+      console.error('Unhandled error in HTTP handler:', err);
+      if (!res.headersSent) {
+        sendJson(res, 500, { success: false, error: 'Internal server error' });
+      }
+    });
+  };
+}
+
 /** The real client IP for rate-limiting. Behind nginx (see the deploy's site config),
  * `req.socket.remoteAddress` is always 127.0.0.1 — every request looks like it comes from the
  * same place, so isRateLimited(ip) would throttle one shared bucket for every visitor instead
@@ -225,7 +251,18 @@ async function handleRegister(req: http.IncomingMessage, res: http.ServerRespons
   }
 
   const passwordHash = await hashPassword(password);
-  const user = createUser(username, passwordHash);
+  let user;
+  try {
+    user = createUser(username, passwordHash);
+  } catch (err) {
+    // The findUserByUsername check above isn't atomic with this insert — two concurrent
+    // registrations for the same name can both pass it, and the second hits the column's
+    // UNIQUE constraint here instead. Treat that specific case as the same 409, not a 500.
+    if (err instanceof Error && 'code' in err && String((err as { code: unknown }).code).startsWith('SQLITE_CONSTRAINT')) {
+      return sendJson(res, 409, { success: false, error: 'Username already taken' });
+    }
+    throw err;
+  }
   const token = signToken(user.id);
   console.log(`📝 New account registered: ${username}`);
   sendJson(res, 201, { success: true, token, username: user.username });
@@ -302,19 +339,19 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
 
   if (url.pathname === '/api/register' && req.method === 'POST') {
-    handleRegister(req, res);
+    safeHandler(handleRegister)(req, res);
     return;
   }
   if (url.pathname === '/api/login' && req.method === 'POST') {
-    handleLogin(req, res);
+    safeHandler(handleLogin)(req, res);
     return;
   }
   if (url.pathname === '/api/progression' && req.method === 'GET') {
-    handleGetProgression(req, res);
+    safeHandler(handleGetProgression)(req, res);
     return;
   }
   if (url.pathname === '/api/progression' && req.method === 'POST') {
-    handleSaveProgression(req, res);
+    safeHandler(handleSaveProgression)(req, res);
     return;
   }
 
@@ -351,7 +388,9 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ server });
+// Default maxPayload is 100MB — real messages here (input/room/chat control packets) are all
+// tiny, so cap it hard rather than let one client send an oversized frame to spike memory.
+const wss = new WebSocketServer({ server, maxPayload: 32 * 1024 });
 server.listen(PORT, () => {
   const mode = IS_PRODUCTION ? 'production' : 'development';
   console.log(`🗡️ [Torment of Souls] Dedicated Game Server running on port ${PORT} (${mode} mode)`);
@@ -396,6 +435,14 @@ wss.on('connection', (ws: WebSocket) => {
   clients.set(clientId, client);
   console.log(`👤 Player connected: ${clientId} (Total active: ${clients.size})`);
 
+  // An 'error' event with no listener is an uncaught exception in Node — crashes the whole
+  // process, taking down every other connected player. Oversized frames (over the maxPayload
+  // set on WebSocketServer above) surface exactly this way, so this handler is required, not
+  // optional. The socket closes itself after emitting this; nothing else to do here.
+  ws.on('error', (err) => {
+    console.warn(`⚠️  WebSocket error on ${clientId}:`, err.message);
+  });
+
   ws.on('message', (raw: string) => {
     try {
       const msg: ClientMessage = JSON.parse(raw.toString());
@@ -407,8 +454,8 @@ wss.on('connection', (ws: WebSocket) => {
             break;
           }
           client.verified = true;
-          client.deviceId = msg.deviceId || client.deviceId;
-          client.name = msg.name || client.name;
+          client.deviceId = (msg.deviceId || client.deviceId).slice(0, MAX_DEVICE_ID_LENGTH);
+          client.name = (msg.name || client.name).slice(0, MAX_NAME_LENGTH);
           client.playerClass = msg.playerClass || client.playerClass;
           client.unlockedSkills = msg.unlockedSkills;
           client.treePassives = msg.treePassives;
@@ -448,11 +495,15 @@ wss.on('connection', (ws: WebSocket) => {
             break;
           }
           if (client.roomId) break; // already in a room — leave it first
+          if (rooms.size >= MAX_ROOMS) {
+            sendToClient(client.id, { type: 'JOIN_REJECTED', reason: 'Server is full — too many active rooms right now.' });
+            break;
+          }
 
           const roomNumber = nextRoomId++;
           const roomId = `room_${roomNumber}`;
-          const roomName = (msg.roomName || '').trim() || `Room #${roomNumber}`;
-          const password = (msg.password || '').trim() || null;
+          const roomName = (msg.roomName || '').trim().slice(0, MAX_ROOM_NAME_LENGTH) || `Room #${roomNumber}`;
+          const password = (msg.password || '').trim().slice(0, MAX_ROOM_PASSWORD_LENGTH) || null;
           const room = new GameRoom(
             roomId,
             sendToClient,
