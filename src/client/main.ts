@@ -42,7 +42,9 @@ function getOrCreateDeviceId(): string {
 }
 
 class GameApp {
-  private ws: WebSocket;
+  // Definite-assignment: always set by connectWebSocket(), called synchronously from the
+  // constructor (and again on every reconnect) — TS can't see through that indirection.
+  private ws!: WebSocket;
   private myId: string = '';
   private isGameRunning: boolean = false;
   private autoAim: boolean = false;
@@ -60,6 +62,17 @@ class GameApp {
   private mode: GameMode;
   private roomBrowser: RoomBrowserUI | null = null;
   private appEl: HTMLElement;
+  private connectionBanner: HTMLElement;
+  // The server already grants a reconnect grace period (see server.ts's JOIN_LOBBY handler /
+  // GAME_CONSTANTS.RECONNECT_GRACE_MS) for exactly this — a dropped connection (mobile
+  // backgrounding, a stray back-gesture, a network blip) used to leave the client with no way
+  // to actually use it: there was no onclose/onerror handler at all, so the render loop just
+  // kept drawing the last-known tick forever (looks like the game is fine) while every
+  // outgoing action silently no-op'd on the dead socket (`send()` checks readyState). Retry
+  // with linear backoff up to a cap, matched loosely to the server's own grace window.
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly MAX_RECONNECT_ATTEMPTS = 20;
 
   // Input states
   private keys: Record<string, boolean> = {};
@@ -108,6 +121,13 @@ class GameApp {
     const escContainer = document.createElement('div');
     escContainer.id = 'esc-container';
     this.appEl.appendChild(escContainer);
+
+    // Appended to <body>, not appEl — needs to stay visible regardless of which screen
+    // (lobby, room browser, esc menu, active match) is currently showing.
+    this.connectionBanner = document.createElement('div');
+    this.connectionBanner.id = 'connection-banner';
+    this.connectionBanner.style.display = 'none';
+    document.body.appendChild(this.connectionBanner);
 
     // 1. Initialize 2.5D Engine Subsystems
     this.renderer = new Renderer2D(gameContainer);
@@ -199,11 +219,7 @@ class GameApp {
     this.setupInputs();
 
     // 3. Connect to WebSocket Server (via unified /ws proxy, works for local, LAN, and HTTPS tunnels)
-    const isHttps = window.location.protocol === 'https:';
-    const wsProtocol = isHttps ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
-    this.ws = new WebSocket(wsUrl);
-    this.setupNetwork();
+    this.connectWebSocket();
 
     // 4. Start 2.5D Render Loop
     this.loop();
@@ -388,9 +404,46 @@ class GameApp {
     });
   }
 
+  private connectWebSocket(): void {
+    const isHttps = window.location.protocol === 'https:';
+    const wsProtocol = isHttps ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+    this.ws = new WebSocket(wsUrl);
+    this.setupNetwork();
+  }
+
+  private showConnectionBanner(text: string): void {
+    this.connectionBanner.textContent = text;
+    this.connectionBanner.style.display = '';
+  }
+
+  private hideConnectionBanner(): void {
+    this.connectionBanner.style.display = 'none';
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer !== null) return; // a retry is already queued
+    const isTh = I18n.getLanguage() === 'th';
+    if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      this.showConnectionBanner(isTh ? '❌ เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ — กรุณารีเฟรชหน้าเว็บ' : '❌ Could not reconnect — please refresh the page');
+      return;
+    }
+    this.reconnectAttempts++;
+    this.showConnectionBanner(
+      isTh ? `🔌 หลุดการเชื่อมต่อ กำลังเชื่อมต่อใหม่... (${this.reconnectAttempts})` : `🔌 Connection lost — reconnecting... (${this.reconnectAttempts})`
+    );
+    const delayMs = Math.min(1000 * this.reconnectAttempts, 5000);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connectWebSocket();
+    }, delayMs);
+  }
+
   private setupNetwork(): void {
     this.ws.onopen = () => {
       console.log('⚔️ Connected to Torment 2.5D Dedicated Server!');
+      this.reconnectAttempts = 0;
+      this.hideConnectionBanner();
       this.send({
         type: 'JOIN_LOBBY',
         name: this.lobby.getPlayerName(),
@@ -401,6 +454,12 @@ class GameApp {
         deviceId: this.deviceId
       });
 
+      // Reconnecting mid-match: the server's JOIN_LOBBY handler already detects an
+      // in-progress room for this deviceId and resumes it (sends GAME_START back) — don't
+      // also re-run the fresh-connect flow below, which would create a stray empty room or
+      // pop the room browser on top of an active match.
+      if (this.isGameRunning) return;
+
       // No offline mode (see MainMenuUI) — both paths use the same server, just differ in
       // how a room is picked. Solo never needs the browser at all: create one silently.
       if (this.mode === 'solo') {
@@ -408,6 +467,16 @@ class GameApp {
       } else {
         this.showRoomBrowser();
       }
+    };
+
+    this.ws.onclose = () => {
+      this.scheduleReconnect();
+    };
+
+    this.ws.onerror = (event) => {
+      // 'close' always follows 'error' for a WebSocket — onclose owns the actual retry so
+      // it isn't scheduled twice; this is just for visibility while debugging.
+      console.warn('⚠️ WebSocket error:', event);
     };
 
     this.ws.onmessage = (event) => {
