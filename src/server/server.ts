@@ -1,3 +1,6 @@
+// Must run before the ./db and ./auth imports below — they read JWT_SECRET/NODE_ENV from
+// process.env at module-load time, so .env needs to be loaded first.
+import 'dotenv/config';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
