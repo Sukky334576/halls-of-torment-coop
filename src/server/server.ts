@@ -1,5 +1,8 @@
 import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
+import serveStatic from 'serve-static';
 import { ClientMessage, ServerMessage, PlayerClass } from '../shared/types';
 import { GameRoom } from './engine/GameRoom';
 
@@ -19,6 +22,15 @@ interface ConnectedClient {
 }
 
 const PORT = 8080;
+// `npm run server` (no NODE_ENV) behaves as before for local dev — the Vite dev server on
+// :3000 still serves the client and proxies /ws here. `npm run server:prod` sets this so a
+// deployed box only needs one process/port: this server also serves the built client below.
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Serves the Vite build (`npm run build` -> dist/) directly. Needed in production because
+// `vite preview` has no /ws proxy config (only `vite dev` does), which left the WebSocket
+// completely unreachable if you tried to run a build with `vite preview` standalone.
+const serveClientBuild = serveStatic(path.resolve(__dirname, '../../dist'), { fallthrough: true });
 const clients: Map<string, ConnectedClient> = new Map();
 let currentRoom: GameRoom | null = null;
 let nextClientId = 1;
@@ -98,13 +110,18 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  res.writeHead(404);
-  res.end();
+  // Falls through to a 404 in local dev, since dist/ doesn't exist until you build — the
+  // Vite dev server on :3000 is what actually serves the client while developing.
+  serveClientBuild(req, res, () => {
+    res.writeHead(404);
+    res.end();
+  });
 });
 
 const wss = new WebSocketServer({ server });
 server.listen(PORT, () => {
-  console.log(`🗡️ [Torment of Souls] Dedicated Game Server running on port ${PORT}`);
+  const mode = IS_PRODUCTION ? 'production' : 'development';
+  console.log(`🗡️ [Torment of Souls] Dedicated Game Server running on port ${PORT} (${mode} mode)`);
 });
 
 function broadcastLobbyState() {
