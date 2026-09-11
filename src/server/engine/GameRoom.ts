@@ -2391,7 +2391,11 @@ export class GameRoom {
         });
       }
 
-      // Chance to drop a Magnet: instantly vacuums every EXP gem & gold coin on the map to the team
+      // Chance to drop a Magnet: instantly vacuums every EXP gem & gold coin on the map to the team.
+      // Times out like the other world drops (Treasure Chest / Health Potion, see
+      // updateTimedWorldSpawns) instead of sitting on the map forever — the swarm keeps moving
+      // forward, so a magnet dropped behind the party would otherwise never get collected and
+      // just pile up as map clutter for the rest of the run.
       if (Math.random() < GAME_CONSTANTS.MAGNET_DROP_CHANCE) {
         this.pickups.push({
           id: ++this.nextPickupId,
@@ -2399,7 +2403,9 @@ export class GameRoom {
           x: dropX,
           y: dropY,
           value: 0,
-          radius: 16
+          radius: 16,
+          duration: 60.0,
+          maxDuration: 60.0
         });
       }
 
