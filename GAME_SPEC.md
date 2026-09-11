@@ -357,4 +357,35 @@ Three unrelated client bugs found and fixed in the same session:
 - **English-mode stage descriptions showed Thai text**: `LobbyUI.ts`'s stage-select card had `stageDesc = isTh ? I18n.t(...) : stage.description`, but `stage.description` in `stages.ts` is itself Thai text (unlike the `stageName`/`stageSub` fields one line above, which already picked the correct language) — swapped to match that existing pattern.
 
 ---
+
+## 16. Co-op Revive: Progress Feedback + One-at-a-Time (2026-09-11)
+
+Downed players previously had zero visual feedback on how close a revive actually was — `PlayerSprite.ts` drew the same static pulsing red circle whether the revive had just started or was one tick from completing. The inner ring is now a real progress arc filling clockwise from 12 o'clock, plus a percentage label, driven by a new `reviveProgress` field (`0-1`) on `PlayerNetworkData` (`ServerPlayer.toNetworkData()`).
+
+Also fixed: if two teammates died stacked on the same spot, a single nearby reviver split their revive contribution across both bodies every tick, advancing them in lockstep instead of finishing one first. `GameRoom.tick()`'s revive resolution is now contention-based per alive player — each one prefers an unclaimed downed teammate within range (so two helpers near two genuinely different bodies still revive both in parallel), only reinforcing an already-claimed target (whichever has the most progress) once every in-range option is taken.
+
+## 17. Boss Toughness Pass + Endless Mode (2026-09-11)
+
+Every boss wave before 30 now has a ranged option and a heavier HP multiplier — previously only Elite Golem (via §14's Ground Slam) and Lord of Torment had abilities beyond plain melee chasing, leaving the wave-10 Hellhound a pure fast chaser with zero ranged threat and free-to-kite.
+
+- **Elite Golem** (waves 5/15/20/25) gains **Boulder Toss**: a `bossSummonTimer`-gated (5s cooldown) `ENEMY_ARROW` projectile fired at the nearest player when they're outside Ground Slam's melee range (260-650px) — since this fires by monster *type*, every Golem appearance gets it automatically, no per-wave wiring needed.
+- **Hellhound** (wave 10) gains **Hellfire Spit**: a 4.5s-cooldown `ENEMY_FIREBALL` fired at the nearest player between 150-500px. Its HP multiplier goes back up (8.5 → 12.0, mirroring Golem's wave-5 re-buff in §14) now that it's an actual threat at range, not just fast.
+- Stage 2/3's own wave-5/15 bosses (Magma Imp, Void Warlock) needed no change — they already have ranged kiting AI baked into their base monster type (`ServerMonster.isRanged()`).
+- A dedicated Souls-style HP bar (`.boss-hpbar-track`/`.boss-hpbar-fill`, driven by the boss's `MonsterNetworkData.hpPercent`) now renders under the boss encounter banner, replacing the old text-only callout.
+
+**Endless mode**: clearing wave 30 (killing Lord of Torment) no longer ends the match outright. `GameRoom` sets `victoryPending = true` (freezing the world exactly like the level-up `isPaused` case) and sends `GAME_OVER` with `canContinue: true`; the client shows the usual victory screen but with a Continue button (`HUD.onContinueRun`) instead of tearing down the in-game view. Choosing Continue sends `CONTINUE_RUN`, which:
+- Clears `victoryPending` and calls `HordeDirector.enableEndlessMode()`, lifting the wave-30 cap on wave advancement.
+- Resets `GameRoom.totalKills` and every player's `gold` to 0 — both are cumulative-for-the-room-lifetime fields already reported (and banked client-side) in the interrupting `GAME_OVER`; without this reset the eventual real end-of-run `GAME_OVER` would report the *entire* match's totals again, double-counting everything already banked.
+- Past wave 30, `HordeDirector.createBossSpawn()`/`getBossName()` cycle the Lord of Torment back in every 5 waves (`wave 35 = cycle 1`, `40 = cycle 2`, ...) at an escalating HP multiplier (`26.0 + cycle * 8.0`), and the wave-30 execute-deadline safety net (§8's `BOSS_DEADLINE_TOTAL_SEC`) now applies to every endless checkpoint too (`currentWave >= MAX_WAVES`, generalized from `=== MAX_WAVES`) so an unkillable endless boss still can't soft-lock the room.
+- Killing the Lord of Torment again while already in endless mode just advances the wave normally — no repeated victory screen.
+
+**UI layout fix**: while testing the boss HP bar, a longer boss-wave label (`"เวฟ 5/30 [เผชิญหน้าบอส]"`) was enough to make `.hud-top-bar` overlap `.hud-banner-stack` — the two were independently `position: absolute` siblings, each guessing a fixed pixel gap from the other (16px / 66px), the same category of bug §15's `.hud-banner-stack` internal fix already addressed among *its own* children. Both are now wrapped in one `.hud-header-stack` flex column so they space by actual rendered height.
+
+## 18. Potions Gated Behind the Skill Tree (2026-09-11)
+
+Reroll/Banish/Lock used to be free on every character (`ServerPlayer.potionRerolls/potionBanishes/potionLocks` hardcoded to `2/2/1`), regardless of any Skill Tree investment. All three now start at **0** and are gated behind three new universal nodes off `uni_root` — **Alchemist's Reroll Vial** (40 cost → 2 charges), **Banishing Ash** (40 cost → 2 charges), **Binding Sigil** (30 cost → 1 charge) — each independently allocatable. A node's grant flows through the same generic `stats` → `treePassives` → `ServerPlayer` pipeline as every other passive (`SkillTreeNode.stats.extraRerolls/extraBanishes/extraLocks`, summed in `MetaProgressionManager.getPassiveTiersForClass()`, applied in `ServerPlayer.initSkillTreeUnlocks()`) — a Trial Quest potion reward (§6) still adds on top additively, unchanged.
+
+**Note for existing saves**: since `allocatedNodes` for any account created before this change won't include the three new node IDs, every existing player drops to 0/0/0 potions immediately after this ships, same as a fresh account — there's no one-time migration grant. This is the intended effect of the change (usable only once invested), not an oversight.
+
+---
 *Created and maintained with Antigravity AI — Built for limitless dark fantasy co-op survival.*
