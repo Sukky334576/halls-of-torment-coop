@@ -354,6 +354,7 @@ export class ServerPlayer implements GridEntity {
       isAttacking: this.isAttacking,
       attackSeq: this.attackSeq,
       isDead: this.isDead,
+      reviveProgress: this.isDead ? Math.min(1, this.reviveTimer / GAME_CONSTANTS.REVIVE_TIME_SECONDS) : undefined,
       isChoosingTrait: this.isChoosingTrait,
       level: this.stats.level,
       exp: this.stats.exp,

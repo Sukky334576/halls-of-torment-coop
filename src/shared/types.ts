@@ -277,6 +277,7 @@ export interface PlayerNetworkData {
   isAttacking: boolean;
   attackSeq: number;
   isDead: boolean;
+  reviveProgress?: number; // 0-1, only meaningful while isDead — see GAME_CONSTANTS.REVIVE_TIME_SECONDS
   isChoosingTrait?: boolean;
   level: number;
   exp: number;

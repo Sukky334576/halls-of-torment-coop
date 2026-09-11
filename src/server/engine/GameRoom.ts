@@ -470,26 +470,52 @@ export class GameRoom {
       }
     }
 
-    for (const player of this.players.values()) {
-      if (player.isDead) {
-        // Dead player: check if alive teammates are in revive circle
-        let revivingTeammates = 0;
-        for (const aliveP of alivePlayers) {
-          const dist = Math.hypot(aliveP.x - player.x, aliveP.y - player.y);
-          if (dist <= GAME_CONSTANTS.REVIVE_ZONE_RADIUS) {
-            revivingTeammates++;
-          }
-        }
+    // Contention-based revive: if multiple downed teammates are stacked within the SAME alive
+    // player's revive radius, that alive player's contribution goes to only ONE of them per
+    // tick — whichever already has the most progress — instead of splitting attention and
+    // reviving both in lockstep forever. Reviving one teammate fully before starting the next
+    // reads as intentional, and means a second alive player still starts a second revive
+    // immediately if there's enough manpower for both.
+    const deadPlayers = Array.from(this.players.values()).filter((p) => p.isDead);
+    const reviverCounts = new Map<string, number>(); // dead player id -> alive players actively reviving them this tick
 
-        if (revivingTeammates > 0) {
-          player.reviveTimer += dt * revivingTeammates;
-          if (player.reviveTimer >= GAME_CONSTANTS.REVIVE_TIME_SECONDS) {
-            player.revive();
-            this.broadcastDamageNumber(player.x, player.y, 100, false); // Green heal/revive indicator
-          }
-        } else {
-          player.reviveTimer = Math.max(0, player.reviveTimer - dt * 0.5);
+    for (const aliveP of alivePlayers) {
+      const inRange = deadPlayers.filter(
+        (deadP) => Math.hypot(aliveP.x - deadP.x, aliveP.y - deadP.y) <= GAME_CONSTANTS.REVIVE_ZONE_RADIUS
+      );
+      if (inRange.length === 0) continue;
+
+      // Prefer a downed teammate nobody else is reviving yet THIS tick — so two helpers near
+      // two genuinely different stacked bodies naturally split up and revive both at once.
+      // Only pile onto an already-claimed target when every in-range option is already taken
+      // (i.e. more revivers than distinct bodies), reinforcing whichever has the most progress
+      // so the leader finishes before the next one starts.
+      const unclaimed = inRange.filter((deadP) => !reviverCounts.has(deadP.id));
+      const pool = unclaimed.length > 0 ? unclaimed : inRange;
+
+      let target = pool[0];
+      let bestDist = Math.hypot(aliveP.x - target.x, aliveP.y - target.y);
+      for (let i = 1; i < pool.length; i++) {
+        const cand = pool[i];
+        const dist = Math.hypot(aliveP.x - cand.x, aliveP.y - cand.y);
+        if (cand.reviveTimer > target.reviveTimer || (cand.reviveTimer === target.reviveTimer && dist < bestDist)) {
+          target = cand;
+          bestDist = dist;
         }
+      }
+      reviverCounts.set(target.id, (reviverCounts.get(target.id) || 0) + 1);
+    }
+
+    for (const player of deadPlayers) {
+      const revivingTeammates = reviverCounts.get(player.id) || 0;
+      if (revivingTeammates > 0) {
+        player.reviveTimer += dt * revivingTeammates;
+        if (player.reviveTimer >= GAME_CONSTANTS.REVIVE_TIME_SECONDS) {
+          player.revive();
+          this.broadcastDamageNumber(player.x, player.y, 100, false); // Green heal/revive indicator
+        }
+      } else {
+        player.reviveTimer = Math.max(0, player.reviveTimer - dt * 0.5);
       }
     }
 
