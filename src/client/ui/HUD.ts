@@ -30,6 +30,7 @@ export class HUD {
   public miniMap: MiniMap;
   public onDash: (() => void) | null = null;
   public onEscMenu: (() => void) | null = null;
+  public onContinueRun: (() => void) | null = null;
 
   constructor(container: HTMLElement, sound?: SoundManager) {
     this.container = container;
@@ -77,6 +78,9 @@ export class HUD {
         <div id="hud-boss-banner" class="hud-boss-banner" style="display: none;">
           <div class="boss-banner-label" id="hud-boss-banner-label">${I18n.t('hud.boss_encounter')}</div>
           <div id="hud-boss-name" class="boss-banner-name">ELITE GOLEM OF TORMENT</div>
+          <div class="boss-hpbar-track">
+            <div id="hud-boss-hpbar-fill" class="boss-hpbar-fill" style="width: 100%;"></div>
+          </div>
         </div>
 
         <!-- Boss Execute Deadline Countdown (only visible once the grace period has passed) -->
@@ -176,6 +180,7 @@ export class HUD {
             <div><span id="go-kills-lbl">${I18n.t('gameover.kills')}</span> <span id="go-kills">0</span></div>
             <div><span id="go-gold-lbl">${I18n.t('gameover.gold')}</span> <span id="go-gold">0</span></div>
           </div>
+          <button id="btn-continue-run" class="btn btn-primary" style="display: none;">${I18n.t('gameover.btn_continue')}</button>
           <button id="btn-retry" class="btn btn-primary">${I18n.t('gameover.btn_retry')}</button>
         </div>
       </div>
@@ -236,6 +241,10 @@ export class HUD {
 
     document.getElementById('btn-retry')?.addEventListener('click', () => {
       window.location.reload();
+    });
+
+    document.getElementById('btn-continue-run')?.addEventListener('click', () => {
+      this.onContinueRun?.();
     });
 
     document.getElementById('btn-dash')?.addEventListener('click', () => {
@@ -301,7 +310,8 @@ export class HUD {
     pickups: PickupNetworkData[] = [],
     dashCooldownRemaining: number = 0,
     activeBuff?: { type: string; durationRemaining: number },
-    bossDeadlineRemaining: number | null = null
+    bossDeadlineRemaining: number | null = null,
+    isEndless: boolean = false
   ): void {
     this.updateDeadlineWarning(bossDeadlineRemaining);
 
@@ -309,8 +319,13 @@ export class HUD {
     const waveEl = document.getElementById('hud-wave');
     if (waveEl) {
       if (isBossWave && bossAlive) {
-        waveEl.textContent = I18n.t('hud.wave_boss', { wave: currentWave, maxWaves });
+        waveEl.textContent = isEndless
+          ? I18n.t('hud.wave_boss_endless', { wave: currentWave })
+          : I18n.t('hud.wave_boss', { wave: currentWave, maxWaves });
         waveEl.style.color = '#ff4d6d';
+      } else if (isEndless) {
+        waveEl.textContent = I18n.t('hud.wave_endless', { wave: currentWave || 1 });
+        waveEl.style.color = '#ffd166';
       } else {
         waveEl.textContent = I18n.t('hud.wave', { wave: currentWave || 1, maxWaves: maxWaves || 30 });
         waveEl.style.color = '#ffd166';
@@ -319,6 +334,11 @@ export class HUD {
 
     const bossBannerEl = document.getElementById('hud-boss-banner');
     const bossNameEl = document.getElementById('hud-boss-name');
+    const bossHpFillEl = document.getElementById('hud-boss-hpbar-fill');
+    if (bossHpFillEl) {
+      const bossMob = isBossWave && bossAlive ? monsters.find((m) => m.isBoss) : undefined;
+      bossHpFillEl.style.width = `${bossMob ? bossMob.hpPercent : 100}%`;
+    }
     if (bossBannerEl && bossNameEl) {
       if (isBossWave && bossName) {
         bossBannerEl.style.display = 'block';
@@ -666,10 +686,14 @@ export class HUD {
     survivalTime: number,
     totalKills: number,
     goldEarned: number,
-    reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER'
+    reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER',
+    canContinue: boolean = false
   ): void {
     const modal = document.getElementById('game-over-modal');
     if (!modal) return;
+
+    const btnContinue = document.getElementById('btn-continue-run');
+    if (btnContinue) btnContinue.style.display = canContinue ? 'inline-block' : 'none';
 
     modal.style.display = 'flex';
     const title = document.getElementById('game-over-title');
@@ -707,6 +731,13 @@ export class HUD {
     if (timeEl) timeEl.textContent = `${mins}:${secs}`;
     if (killsEl) killsEl.textContent = totalKills.toString();
     if (goldEl) goldEl.textContent = goldEarned.toString();
+  }
+
+  /** Hides the game-over/victory modal without touching the rest of the in-game view — used
+   * by the Continue button (see onContinueRun) since the game keeps running underneath it. */
+  public hideGameOver(): void {
+    const modal = document.getElementById('game-over-modal');
+    if (modal) modal.style.display = 'none';
   }
 
   public addFloatingMessage(x: number, y: number, text: string, color: string = '#facc15'): void {

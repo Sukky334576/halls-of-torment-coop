@@ -2838,6 +2838,23 @@
       letter-spacing: 2px;
       text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
     }
+    /* Dedicated Souls-style boss HP bar under the name — distinct from the small floating
+       bar over the boss's own sprite, always visible even if the boss is off-screen. */
+    .boss-hpbar-track {
+      width: 320px;
+      max-width: 60vw;
+      height: 10px;
+      margin: 8px auto 0;
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .boss-hpbar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #dc2626 0%, #ef4444 60%, #f87171 100%);
+      transition: width 0.25s ease-out;
+    }
 
     /* --- STAGE SELECTION PORTAL MODAL --- */
     .stage-modal-backdrop {

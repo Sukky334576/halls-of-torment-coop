@@ -38,6 +38,10 @@ export class HordeDirector {
   private spawnAccumulator: number = 0;
   private bossSpawnedForWave: boolean = false;
   private bossAlive: boolean = false;
+  // Set once the party picks "Continue" on the post-wave-30 victory screen (GameRoom.
+  // handleContinueRun) — lifts the wave-30 cap so waves keep advancing indefinitely, with the
+  // Lord of Torment cycling back in as the boss checkpoint every 5 waves.
+  private endlessMode: boolean = false;
   private pendingTomeDrop: boolean = false;
   // Seconds spent in the FINAL wave's boss encounter specifically (not earlier boss waves at
   // 5/10/15/20/25 — those can't soft-lock the room since a normal wave always follows them).
@@ -63,6 +67,14 @@ export class HordeDirector {
     return ++this.nextEntityId;
   }
 
+  public enableEndlessMode(): void {
+    this.endlessMode = true;
+  }
+
+  public isEndlessMode(): boolean {
+    return this.endlessMode;
+  }
+
   public update(dt: number, playerCount: number, activeMonsterCount: number): SpawnRequest[] {
     this.elapsedTime += dt;
     this.waveTimer -= dt;
@@ -74,18 +86,19 @@ export class HordeDirector {
       this.waveTimer = 0; // Hold at 0 during boss encounter
     }
 
-    // Final-wave execute deadline: only ticks during the LAST boss encounter (wave 30) —
-    // earlier boss waves (5/10/15/20/25) always resolve into a following normal wave, so they
-    // can't soft-lock the room and must never be affected by this. Resets immediately once
-    // the boss stops blocking (killed, or any other reason), so a defeated-in-time boss never
-    // leaves a stale timer running into the next state.
-    if (isBossBlocking && this.currentWave === HordeDirector.MAX_WAVES) {
+    // Final-wave execute deadline: ticks during the wave-30 boss encounter, and — once the party
+    // has opted into endless mode — every later Lord of Torment checkpoint too (wave 35, 40, ...),
+    // since each of those can just as easily soft-lock the room as the original wave 30 fight.
+    // Earlier boss waves (5/10/15/20/25) always resolve into a following normal wave, so they're
+    // never affected. Resets immediately once the boss stops blocking (killed, or any other
+    // reason), so a defeated-in-time boss never leaves a stale timer running into the next state.
+    if (isBossBlocking && this.currentWave >= HordeDirector.MAX_WAVES) {
       this.bossEncounterTimer += dt;
     } else {
       this.bossEncounterTimer = 0;
     }
 
-    if (!isBossBlocking && this.waveTimer <= 0 && this.currentWave < HordeDirector.MAX_WAVES) {
+    if (!isBossBlocking && this.waveTimer <= 0 && (this.currentWave < HordeDirector.MAX_WAVES || this.endlessMode)) {
       this.currentWave++;
       this.waveTimer = HordeDirector.WAVE_DURATION_SEC;
       this.bossSpawnedForWave = false;
@@ -158,6 +171,11 @@ export class HordeDirector {
   }
 
   public getBossName(): string | undefined {
+    if (this.currentWave > HordeDirector.MAX_WAVES && this.isBossWave()) {
+      // wave 35 is the first post-victory checkpoint -> cycle 1 ("AWAKENING 1"), wave 40 -> 2, etc.
+      const cycle = Math.floor((this.currentWave - HordeDirector.MAX_WAVES) / 5);
+      return `THE LORD OF TORMENT — AWAKENING ${cycle}`;
+    }
     switch (this.currentWave) {
       case 5:
         if (this.stageId === 2) return 'MAGMA OVERLORD VULCAN';
@@ -185,19 +203,22 @@ export class HordeDirector {
   private createBossSpawn(wave: number, baseHpScale: number, baseDmgScale: number): SpawnRequest {
     const bossName = this.getBossName()!;
     let type = MonsterType.ELITE_GOLEM;
-    // REBALANCED HP SCALING: Nerfed Wave 5 from 12.0 down to 5.2 to eliminate tedious slog!
-    let bossHpMultiplier = 5.2;
+    // Wave 5 was nerfed from 12.0 down to 5.2 to eliminate a tedious slog, then re-buffed to
+    // 8.0 (2026-09-11) once it had actual abilities (Ground Slam + Boulder Toss ranged, see
+    // updateBossAbilities) worth surviving for — the earlier nerf predates those and was
+    // tuned for a boss that could only walk at you.
+    let bossHpMultiplier = 8.0;
 
     if (wave === 5) {
       if (this.stageId === 2) {
         type = MonsterType.MAGMA_IMP;
-        bossHpMultiplier = 5.5;
+        bossHpMultiplier = 8.5;
       } else if (this.stageId === 3) {
         type = MonsterType.VOID_WARLOCK;
-        bossHpMultiplier = 5.8;
+        bossHpMultiplier = 9.0;
       } else {
         type = MonsterType.ELITE_GOLEM;
-        bossHpMultiplier = 5.2;
+        bossHpMultiplier = 8.0;
       }
     } else if (wave === 10) {
       type = MonsterType.HELLHOUND;
@@ -214,6 +235,12 @@ export class HordeDirector {
     } else if (wave === 30) {
       type = MonsterType.LORD_OF_TORMENT;
       bossHpMultiplier = 26.0; // Nerfed from 45.0
+    } else if (wave > 30) {
+      // Endless mode (past the wave-30 victory, see GameRoom.handleContinueRun): the Lord of
+      // Torment keeps coming back every 5 waves, escalating past the wave-30 baseline.
+      type = MonsterType.LORD_OF_TORMENT;
+      const cycle = Math.floor((wave - 30) / 5);
+      bossHpMultiplier = 26.0 + cycle * 8.0;
     }
 
     return {

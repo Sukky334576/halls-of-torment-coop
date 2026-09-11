@@ -80,6 +80,8 @@ const TRANSLATIONS: TranslationKeys = {
   // In-Game HUD
   'hud.wave': { th: 'เวฟ {wave}/{maxWaves}', en: 'WAVE {wave}/{maxWaves}' },
   'hud.wave_boss': { th: 'เวฟ {wave}/{maxWaves} [เผชิญหน้าบอส]', en: 'WAVE {wave}/{maxWaves} [BOSS BATTLE]' },
+  'hud.wave_endless': { th: 'เวฟ {wave} ♾️ ไร้ขีดจำกัด', en: 'WAVE {wave} ♾️ ENDLESS' },
+  'hud.wave_boss_endless': { th: 'เวฟ {wave} ♾️ [เผชิญหน้าบอส]', en: 'WAVE {wave} ♾️ [BOSS BATTLE]' },
   'hud.defeat_boss': { th: '⚔️ กำจัดบอส! ⚔️', en: '⚔️ DEFEAT BOSS ⚔️' },
   'hud.boss_encounter': { th: '⚠️ บอสสุดแกร่งปรากฏตัว! ⚠️', en: '⚠️ DREADFUL BOSS ENCOUNTER ⚠️' },
   'hud.deadline_warning': { th: '💀 พลังมืดกำลังกลืนกินสนามรบ! รีบจบศึกก่อนหมดเวลา! 💀', en: '💀 DARKNESS IS CONSUMING THE BATTLEFIELD — END THIS FIGHT! 💀' },
@@ -145,6 +147,7 @@ const TRANSLATIONS: TranslationKeys = {
   'gameover.kills': { th: 'ศัตรูที่กำจัดได้:', en: 'Total Enemies Slain:' },
   'gameover.gold': { th: 'เหรียญวิญญาณที่คว้ามาได้:', en: 'Soul Coins Secured:' },
   'gameover.btn_retry': { th: 'กลับสู่ล็อบบี้ (RETURN TO HUB)', en: 'RETURN TO HUB' },
+  'gameover.btn_continue': { th: '⚔️ เล่นต่อ (โหมดไร้ขีดจำกัด)', en: '⚔️ CONTINUE (ENDLESS MODE)' },
 
   // Classes Localized Names & Titles
   'class.swordsman.name': { th: 'นักรบดาบเหล็ก', en: 'Swordsman' },

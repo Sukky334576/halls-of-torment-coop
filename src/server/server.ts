@@ -666,6 +666,14 @@ wss.on('connection', (ws: WebSocket) => {
           }
           break;
         }
+
+        case 'CONTINUE_RUN': {
+          const entry = getClientRoom(client);
+          if (entry && entry.room.isStarted) {
+            entry.room.handleContinueRun();
+          }
+          break;
+        }
       }
     } catch (err) {
       console.error('Error handling client message:', err);
