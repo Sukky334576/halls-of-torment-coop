@@ -30,6 +30,14 @@ export class TraitSelector {
   private currentChoices: TraitChoiceView[] = [];
   private currentPotions: PotionState = { rerolls: 0, banishes: 0, locks: 0, lockedTraitId: null };
   private activeMode: 'NONE' | 'BANISH' | 'LOCK' = 'NONE';
+  // True from the moment a REROLL/BANISH/LOCK click fires until the server's response
+  // (showChoices for REROLL/BANISH, updatePotions for LOCK) lands and refreshes currentPotions.
+  // The button handlers below gate on this instead of only on currentPotions counts, because
+  // currentPotions is stale for the whole network round-trip — a real double-click sends two
+  // separate USE_POTION messages that the server (which has no way to tell them apart from two
+  // deliberate clicks) will both honor, silently spending an extra potion. See
+  // docs/GAME_WIKI.md §4.7 risk "potion action ซ้อนกันได้".
+  private isPotionActionPending: boolean = false;
 
   constructor(
     container: HTMLElement,
@@ -53,6 +61,7 @@ export class TraitSelector {
       this.currentPotions = potions;
     }
     this.activeMode = 'NONE';
+    this.isPotionActionPending = false; // the REROLL/BANISH this response answers (if any) is done
 
     document.body.classList.add('trait-modal-open');
     this.render();
@@ -68,11 +77,13 @@ export class TraitSelector {
     if (modal) modal.style.display = 'none';
     this.isShowing = false;
     this.activeMode = 'NONE';
+    this.isPotionActionPending = false; // whatever request was in flight, there's nothing left to answer it
     document.body.classList.remove('trait-modal-open');
   }
 
   public updatePotions(potions: PotionState): void {
     this.currentPotions = potions;
+    this.isPotionActionPending = false; // answers the LOCK click (REROLL/BANISH clear via showChoices)
     if (this.isShowing) {
       this.render();
     }
@@ -169,7 +180,9 @@ export class TraitSelector {
     if (rerollBtn) {
       rerollBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (this.isPotionActionPending) return; // ignore double-click while awaiting the server's reroll
         if (this.currentPotions.rerolls > 0 && this.onUsePotion) {
+          this.isPotionActionPending = true;
           this.activeMode = 'NONE';
           this.onUsePotion('REROLL');
         }
@@ -205,7 +218,9 @@ export class TraitSelector {
         if (!id) return;
 
         if (this.activeMode === 'BANISH') {
+          if (this.isPotionActionPending) return; // ignore double-click while awaiting the server's response
           if (this.onUsePotion) {
+            this.isPotionActionPending = true;
             this.activeMode = 'NONE';
             this.onUsePotion('BANISH', id);
           }
@@ -213,7 +228,9 @@ export class TraitSelector {
         }
 
         if (this.activeMode === 'LOCK') {
+          if (this.isPotionActionPending) return; // ignore double-click while awaiting the server's response
           if (this.onUsePotion) {
+            this.isPotionActionPending = true;
             this.activeMode = 'NONE';
             this.onUsePotion('LOCK', id);
           }

@@ -115,8 +115,11 @@ export class ServerMonster implements GridEntity {
         const step = this.speed * dt;
         this.x += (dx / dist) * Math.min(step, dist);
         this.y += (dy / dist) * Math.min(step, dist);
-      } else if (dist < 120) {
-        // Back off away from player (slower retreat so player can catch them)
+      } else if (dist < 120 && dist > 1e-6) {
+        // Back off away from player (slower retreat so player can catch them). Guarded against
+        // dist===0 (target sitting exactly on top of us — e.g. caller defaults target to our
+        // own position when every player is dead) which would otherwise divide by zero and
+        // set x/y to NaN, permanently breaking this monster's position.
         const step = this.speed * 0.5 * dt;
         this.x -= (dx / dist) * step;
         this.y -= (dy / dist) * step;

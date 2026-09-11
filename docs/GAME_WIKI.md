@@ -9,6 +9,7 @@
 | วันที่ | สรุปสิ่งที่เปลี่ยน | เหตุผล/อ้างอิง commit หรือ prompt ที่สั่ง |
 |---|---|---|
 | 2026-09-11 | สร้างเอกสารครั้งแรก (compile จาก source code จริง 5 หมวด + Top Stability Risks) | คำสั่ง user: ใช้ GAME_WIKI.md เป็นฐานข้อมูล วิเคราะห์จาก source จริง |
+| 2026-09-11 | Round 1 functional bugfix: แก้ risk #2 (level-up choices ว่าง), #6 (validate traitId), #9 (potion double-click), #11 (NaN guard), #12 (magic rarity fallback) + ⚠️ Correction risk #5, #7 ที่ล้าสมัย/overstate | `docs/archive/2026-09-11-round1-functional-bugfixes.md` |
 
 ## สารบัญ
 
@@ -299,7 +300,7 @@ private rollGearDrop(isBoss: boolean): GearItem | undefined {
 
 ### 2.6 Stability Risk — Item/Gear System
 
-- 🟢 **ต่ำ — Rarity `'magic'` นิยามไว้แต่ไม่มีไอเทมใช้เลย**: ถ้า `rollGearDrop`/`getRandomGearOfRarity` ถูกเรียกด้วย `'magic'` วันไหน (เช่น มีคนเพิ่ม weight เข้าไปอนาคต) จะได้ `undefined` เงียบๆ
+- ✅ **แก้แล้ว (2026-09-11)** — ~~🟢 ต่ำ — Rarity `'magic'` นิยามไว้แต่ไม่มีไอเทมใช้เลย: ถ้า `rollGearDrop`/`getRandomGearOfRarity` ถูกเรียกด้วย `'magic'` วันไหน (เช่น มีคนเพิ่ม weight เข้าไปอนาคต) จะได้ `undefined` เงียบๆ~~ — `getRandomGearOfRarity()` เพิ่ม fallback ไป `'common'` + `console.warn` เมื่อ tier ว่าง ไม่คืน `undefined` เงียบๆ อีกต่อไป (`src/shared/gearData.ts`, spec: `docs/archive/2026-09-11-round1-functional-bugfixes.md`)
 - 🟢 **ต่ำ — Magic number ของ weight array ไม่มีชื่อ constant**: `[['common',70],['rare',25],['unique',5]]` เขียนตรงในฟังก์ชัน ไม่ใช่ named constant เหมือน `GEAR_DROP_CHANCE`
 - 🟢 **ต่ำ — vaultInventory ไม่มี cap**: `addGearToVault` push เข้า array ไม่จำกัดขนาด
 
@@ -411,8 +412,8 @@ Stage multiplier: Stage 1 = 1.0/1.0, Stage 2 = 1.6/1.4, Stage 3 = 2.5/2.0 (HP/DM
 
 ### 3.7 Stability Risk — Monster System
 
-- 🟡 **กลาง — `COOP_HP_SCALE_PER_PLAYER` นิยามไว้แต่ไม่ถูกใช้จริง**: `constants.ts:8` มีค่านี้พร้อมคอมเมนต์ "+35% enemy HP per additional player" แต่ grep ทั้ง `HordeDirector.ts`/`GameRoom.ts` ไม่พบจุดใช้งานเลย (มีแต่ `COOP_SPAWN_SCALE_PER_PLAYER` ที่ใช้จริง) — HP scaling ต่อจำนวนผู้เล่นอาจไม่ทำงานจริงตามที่ตั้งใจไว้
-- 🟡 **กลาง — AI ไม่มี fallback เมื่อ target ตายกลางทาง**: `ServerMonster.update(dt, targetX, targetY)` ไม่เช็คว่าผู้เล่นเป้าหมายยังมีชีวิตอยู่ ณ ตอนเรียก ต้องพึ่ง caller เลือกเป้าหมายถูกต้องเสมอ
+- ⚠️ **Correction (2026-09-11)** — ~~🟡 กลาง — `COOP_HP_SCALE_PER_PLAYER` นิยามไว้แต่ไม่ถูกใช้จริง~~: **ล้าสมัย** ตอนตรวจสอบซ้ำพบว่าค่านี้ถูกใช้จริงแล้วที่ `GameRoom.ts:582` (`const coopHpScale = 1.0 + (this.players.size - 1) * GAME_CONSTANTS.COOP_HP_SCALE_PER_PLAYER;`) — ไม่ใช่ dead code อีกต่อไป ไม่ทราบว่าถูกเพิ่มเข้ามาตั้งแต่เมื่อไหร่ (ก่อนหน้าที่ข้อมูลในเอกสารนี้จะถูก compile) เอกสารฉบับแรกวิเคราะห์คลาดเคลื่อน
+- ✅ **แก้แล้ว (2026-09-11)** — 🟡 กลาง — AI ไม่มี fallback เมื่อ target ตายกลางทาง: `ServerMonster.update(dt, targetX, targetY)` ไม่เช็คว่าผู้เล่นเป้าหมายยังมีชีวิตอยู่ ณ ตอนเรียก — **การแสดงออกจริงของ risk นี้ที่ยืนยันได้จาก source**: เมื่อไม่มีผู้เล่นที่ยังมีชีวิตเลย (`alivePlayers` ว่าง) caller จะ default `targetX/Y = monster.x/y` เอง (`GameRoom.ts`) ทำให้ `dist=0` → หารด้วยศูนย์ใน ranged retreat branch → พิกัด mob กลายเป็น `NaN` ถาวร แก้โดยเพิ่ม guard `dist > 1e-6` ก่อนหาร (`src/server/entities/ServerMonster.ts`, test: `ServerMonster.test.ts`, spec: `docs/archive/2026-09-11-round1-functional-bugfixes.md`)
 - 🟢 **ต่ำ — Boss ability คำนวณ "ผู้เล่นใกล้สุด" ซ้ำ 3-4 รอบ**: โค้ดคล้ายกันสูงใน `updateBossAbilities()` แต่ละท่าต่างคนต่าง loop เอง
 - 🟢 **ต่ำ — `pickMonsterType()` เป็น if-chain ไม่ใช่ data table**: เพิ่ม/แก้สัดส่วนต้องแก้ logic โดยตรง ไม่มีระบบเช็ครวมไม่เกิน 1.0 อัตโนมัติ
 - 🟢 **ต่ำ — HELLHOUND เร็วกว่าผู้เล่นทุกคน**: เป็น design choice ที่ตั้งใจ (คอมเมนต์ยืนยัน) ไม่ใช่บั๊ก แต่ถ้า move speed จาก gear/skill tree สูงพอในอนาคตอาจกลับมาเป็นปัญหาสมดุล
@@ -530,9 +531,9 @@ const TIER_POWER_MULTIPLIER = { S: 2.2, A: 1.7, B: 1.35, C: 1.0, D: 0.7 };
 
 ### 4.7 Stability Risk — Card/Skill System
 
-- 🔴 **สูง — Weighted-random selection อาจได้ choices ว่างเปล่า**: `while (selectedTraits.length < 3 && pool.length > 0)` หยุดทันทีถ้า pool ว่าง ไม่มี fallback ถ้าผู้เล่นปลดทุกสกิลจนครบ rank 3 หมด + banish การ์ดที่เหลือเยอะ (หรือคลาสเล็กอย่าง Cowboy/Gambler/Mecha ที่มีแค่ 4 การ์ดคลาส + 6 universal) อาจเหลือ choices 0-2 ใบ ผู้เล่นค้างที่ `isChoosingTrait=true` ตลอดไป (โซโล่เกม pause ค้างทั้งห้องด้วย)
-- 🟡 **กลาง — LOCK/BANISH ไม่ validate ว่า traitId อยู่ในตัวเลือกปัจจุบันจริง**
-- 🟡 **กลาง — Race condition ที่ potion action ซ้อนกันได้**: ไม่มี lock ป้องกัน double-click ก่อน response กลับมา (ผลกระทบเป็น UX มากกว่า data corruption)
+- ✅ **แก้แล้ว (2026-09-11)** — ~~🔴 สูง — Weighted-random selection อาจได้ choices ว่างเปล่า~~: `triggerLevelUpChoices()` ตอนนี้เช็ค `selectedTraits.length === 0` ก่อนส่ง — ถ้าว่างจริง จะไม่ส่ง `LEVEL_UP_CHOICE` เปล่าอีกต่อไป แต่ส่ง `LEVEL_UP_SKIPPED` (heal 25% max HP เป็น consolation) แล้ว resolve pick ทันทีผ่าน `finishLevelUpChoice()` (`src/server/engine/GameRoom.ts`, client: `src/client/main.ts`, test: `GameRoom.test.ts` describe "empty trait-pool skip", spec: `docs/archive/2026-09-11-round1-functional-bugfixes.md`)
+- ✅ **แก้แล้ว (2026-09-11)** — ~~🟡 กลาง — LOCK/BANISH ไม่ validate ว่า traitId อยู่ในตัวเลือกปัจจุบันจริง~~: `ServerPlayer.currentTraitChoiceIds` เก็บ id ที่เสนอจริงทุกครั้งที่ส่ง choices; `handleSelectTrait`/`handleUsePotion` (BANISH/LOCK) reject ถ้า traitId ไม่อยู่ในนั้น + ตรวจคลาส/signature-unlock/rank ซ้ำอีกชั้น (defense-in-depth) (`src/server/engine/GameRoom.ts`, `ServerPlayer.ts`)
+- ✅ **แก้แล้ว (2026-09-11)** — ~~🟡 กลาง — Race condition ที่ potion action ซ้อนกันได้~~: ตรวจสอบเพิ่มเติมพบว่า root cause จริงอยู่ฝั่ง **client** ไม่ใช่ server — `ws.on('message', ...)` ฝั่ง server เป็น synchronous ล้วน (ไม่มี `await`) จึงไม่มี race window จริงในกระบวนการฝั่ง server เลย ตัวปัญหาจริงคือปุ่ม REROLL/BANISH/LOCK ฝั่ง client เช็คแค่ `currentPotions` (ค่าที่ cache ไว้ ยังไม่ update จนกว่า response จะมา) ไม่ gate การคลิกซ้ำระหว่างรอ network round-trip แก้โดยเพิ่ม `isPotionActionPending` flag ใน `TraitSelector.ts` ที่ set ทันทีตอนคลิก และ clear เมื่อ response (`showChoices`/`updatePotions`) กลับมา (`src/client/ui/TraitSelector.ts`)
 - 🟡 **กลาง — Tier weight/multiplier เป็น magic number ในโค้ด ไม่ใช่ config**: ปรับ balance ต้องแก้โค้ด+build ใหม่ทุกครั้ง
 - 🟢 **ต่ำ — สองระบบคำศัพท์คู่ขนาน** (rarity string vs tier letter S/A/B/C/D)
 - 🟢 **ต่ำ — comment จำนวนการ์ดในโค้ดล้าสมัย** (อ้าง 78 ทั้งที่จริง 70)
@@ -612,7 +613,7 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 ### 5.6 Stability Risk — Game Logic & Mechanics
 
 - 🔴 **สูง — TICK message ไม่มี delta compression**: ทุก 40ms ส่ง state ผู้เล่น/มอนสเตอร์/กระสุน/pickup **ทั้งหมด**ในข้อความเดียว ที่ wave ท้ายๆ (มอนถึง 380+120×(playerCount-1) ตัว) payload ต่อ tick ใหญ่มาก คูณ 25 ครั้ง/วิ ไม่มี mechanism ลด payload เมื่อ scale ขึ้น
-- 🟡 **กลาง — Superconduct chain lightning เรียกตัวเองแบบ recursive**: ไม่มี guard กันการ trigger ซ้ำในเฟรมเดียว
+- ⚠️ **Correction (2026-09-11)** — ~~🟡 กลาง — Superconduct chain lightning เรียกตัวเองแบบ recursive: ไม่มี guard กันการ trigger ซ้ำในเฟรมเดียว~~: **Overstate** ตรวจสอบซ้ำพบว่า chain damage เรียก `this.damageMonster(cm, Math.round(amount * 0.6), false)` **ไม่ส่ง** `sourceElement` param — reaction block (`if (element) {...}`) จึงไม่ทำงานกับเป้าหมายที่โดน chain ต่อ ทำให้ chain ไม่ recurse ต่อจริง (guard อยู่แล้วโดยบังเอิญจากการไม่ส่ง element ไม่ใช่ recursion bug จริง) (`src/server/engine/GameRoom.ts`)
 - 🟡 **กลาง — Armor formula ไม่มี cap บนขีดสุด**: ไม่มี "effective HP cap" ที่ตั้งใจออกแบบไว้ชัดเจน (แม้ actualDamage floor ที่ 1 จะกันสุดทางไว้อยู่)
 - 🟢 **ต่ำ — Elemental reaction logic ยาวเป็น if/else chain เดียว**: เพิ่มปฏิกิริยาใหม่เสี่ยง order-of-check ผิด
 
@@ -622,31 +623,32 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 
 ### 🔴 สูง — แก้ก่อน (เสี่ยงกระทบผู้เล่นจริง/ทำให้เกมค้าง)
 
-1. **Server ไม่ validate `treePassives`/สถิติที่ client ส่งมา** (§1.10) — ช่องโหว่ cheat ตรงที่สุด เกมเป็น co-op แชร์ห้องกับคนอื่น ผู้เล่นคนเดียวแก้ payload กระทบทุกคนในแมตช์ได้ทันที
-2. **`triggerLevelUpChoices()` อาจส่งการ์ดว่างเปล่าไม่มี fallback** (§4.7) — ผู้เล่นค้างเลือกการ์ดไม่ได้ตลอดไป โซโล่เกม pause ค้างทั้งห้องด้วย
-3. **TICK message ส่ง full state ทุก 40ms ไม่มี delta compression** (§5.6) — payload โตตามจำนวนมอน/ผู้เล่น/เวฟ เป็นความเสี่ยง scaling ระยะยาว
+1. **Server ไม่ validate `treePassives`/สถิติที่ client ส่งมา** (§1.10) — ช่องโหว่ cheat ตรงที่สุด เกมเป็น co-op แชร์ห้องกับคนอื่น ผู้เล่นคนเดียวแก้ payload กระทบทุกคนในแมตช์ได้ทันที — **ยังไม่แก้** (scope ใหญ่ ต้องแยก Phase ของตัวเอง ดู `GAME_BLUEPRINT.md` Phase 1)
+2. ~~`triggerLevelUpChoices()` อาจส่งการ์ดว่างเปล่าไม่มี fallback~~ (§4.7) — **✅ แก้แล้ว 2026-09-11**
+3. **TICK message ส่ง full state ทุก 40ms ไม่มี delta compression** (§5.6) — payload โตตามจำนวนมอน/ผู้เล่น/เวฟ เป็นความเสี่ยง scaling ระยะยาว — **ยังไม่แก้** (scope ใหญ่)
 
 ### 🟡 กลาง — ควรแก้รอบถัดไป
 
-4. Magic number กระจายใน `ServerPlayer.takeDamage()` แทนที่จะเป็น config (§1.10)
-5. `COOP_HP_SCALE_PER_PLAYER` นิยามไว้แต่ไม่เคยถูกเรียกใช้จริง (§3.7)
-6. `LOCK`/`BANISH` potion ไม่ validate ว่า `traitId` อยู่ในตัวเลือกปัจจุบันจริง (§4.7)
-7. Superconduct chain lightning เรียกตัวเองแบบ recursive ไม่มี guard (§5.6)
-8. โค้ดสร้าง JOIN_LOBBY payload/addPlayer ซ้ำหลายจุด (§1.10)
-9. Race condition ที่ potion action ยิงซ้อนกันได้ไม่มี lock (§4.7)
-10. Tier weight/multiplier เป็น magic number ไม่ใช่ config ปรับได้ (§4.7)
-11. `ServerMonster.update()` ไม่เช็คว่า target ยังมีชีวิตอยู่ (§3.7)
+4. Magic number กระจายใน `ServerPlayer.takeDamage()` แทนที่จะเป็น config (§1.10) — ยังไม่แก้
+5. ~~`COOP_HP_SCALE_PER_PLAYER` นิยามไว้แต่ไม่เคยถูกเรียกใช้จริง~~ (§3.7) — **⚠️ ล้าสมัย 2026-09-11**: ใช้จริงแล้วที่ `GameRoom.ts:582`
+6. ~~`LOCK`/`BANISH` potion ไม่ validate ว่า `traitId` อยู่ในตัวเลือกปัจจุบันจริง~~ (§4.7) — **✅ แก้แล้ว 2026-09-11**
+7. ~~Superconduct chain lightning เรียกตัวเองแบบ recursive ไม่มี guard~~ (§5.6) — **⚠️ Overstate 2026-09-11**: ไม่ recurse จริง (ไม่ส่ง element param ตอน chain)
+8. โค้ดสร้าง JOIN_LOBBY payload/addPlayer ซ้ำหลายจุด (§1.10) — ยังไม่แก้
+9. ~~Race condition ที่ potion action ยิงซ้อนกันได้ไม่มี lock~~ (§4.7) — **✅ แก้แล้ว 2026-09-11** (root cause จริงอยู่ฝั่ง client)
+10. Tier weight/multiplier เป็น magic number ไม่ใช่ config ปรับได้ (§4.7) — ยังไม่แก้
+11. ~~`ServerMonster.update()` ไม่เช็คว่า target ยังมีชีวิตอยู่~~ (§3.7) — **✅ แก้แล้ว 2026-09-11** (NaN guard สำหรับกรณี dist=0)
 
 ### 🟢 ต่ำ — Maintainability (ไม่เร่งด่วน)
 
-12. Rarity `'magic'` นิยามไว้แต่ไม่มีไอเทมใช้เลย (§2.6)
-13. Naming ไม่ตรงกันระหว่าง `SkillTreeNode.stats`/`PlayerStats` vs `GearItem.stats` (§1.10)
-14. `pickMonsterType()` เป็น if-chain ไม่ใช่ data table (§3.7)
-15. TRAIT_POOL count comment ล้าสมัย (อ้าง 78 จริง 70) (§4.7)
-16. สองระบบคำศัพท์คู่ขนาน rarity string vs tier letter (§4.7)
-17. Duplicated "หา nearest player" logic ใน boss abilities 4 จุด (§3.7)
-18. vaultInventory ไม่มี cap (§2.6)
+12. ~~Rarity `'magic'` นิยามไว้แต่ไม่มีไอเทมใช้เลย~~ (§2.6) — **✅ แก้แล้ว 2026-09-11** (fallback ไป common)
+13. Naming ไม่ตรงกันระหว่าง `SkillTreeNode.stats`/`PlayerStats` vs `GearItem.stats` (§1.10) — ยังไม่แก้
+14. `pickMonsterType()` เป็น if-chain ไม่ใช่ data table (§3.7) — ยังไม่แก้
+15. TRAIT_POOL count comment ล้าสมัย (อ้าง 78 จริง 70) (§4.7) — ยังไม่แก้
+16. สองระบบคำศัพท์คู่ขนาน rarity string vs tier letter (§4.7) — ยังไม่แก้
+17. Duplicated "หา nearest player" logic ใน boss abilities 4 จุด (§3.7) — ยังไม่แก้
+18. vaultInventory ไม่มี cap (§2.6) — ยังไม่แก้
 
 ---
 
 *เอกสารนี้สร้างจากการวิเคราะห์ source code จริง ณ วันที่ 2026-09-11 — หากโค้ดมีการเปลี่ยนแปลงหลังจากนี้ ควรตรวจสอบซ้ำก่อนใช้อ้างอิง*
+*อัปเดตล่าสุด: 2026-09-11 (Round 1 functional bugfix) — ดูรายละเอียดที่ `docs/archive/2026-09-11-round1-functional-bugfixes.md`*

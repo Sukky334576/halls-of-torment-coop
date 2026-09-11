@@ -435,6 +435,15 @@ export type ServerMessage =
       potionLocks: number;
       lockedTraitId?: string | null;
     }
+  | {
+      // Sent instead of LEVEL_UP_CHOICE when no eligible trait choices remain (every card
+      // maxed at rank 3 and/or banished away) — closes the pick client-side with a consolation
+      // heal instead of leaving the player stuck on an empty choice modal forever.
+      type: 'LEVEL_UP_SKIPPED';
+      healedAmount: number;
+      message: string;
+      thaiMessage: string;
+    }
   | { type: 'WELL_GEAR_RETRIEVED'; gearId: string; gearName: string; retrievedBy: string }
   | { type: 'ROOM_LIST'; rooms: RoomSummary[] }
   | { type: 'GRANT_GOLD'; amount: number; message: string; thaiMessage: string; grantId?: string }

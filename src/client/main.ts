@@ -560,6 +560,21 @@ class GameApp {
             break;
           }
 
+          case 'LEVEL_UP_SKIPPED': {
+            // Server had no eligible trait choices left to offer (every card maxed/banished) —
+            // close the card modal instead of leaving it stuck open with nothing to pick.
+            this.traits.hide();
+            const isThSkipped = I18n.getLanguage() === 'th';
+            this.lobby.showToast(isThSkipped ? msg.thaiMessage : msg.message);
+            if (this.isGameRunning && this.latestTick) {
+              const me = this.latestTick.players.find((p) => p.id === this.myId);
+              if (me && msg.healedAmount > 0) {
+                this.hud.addFloatingMessage(me.x, me.y - 45, `💚 +${msg.healedAmount} HP`, '#22c55e');
+              }
+            }
+            break;
+          }
+
           case 'GRANT_GOLD': {
             const grantKey = msg.grantId ? `torment_grant_${msg.grantId}` : 'torment_server_airdrop_35k_v2';
             if (!localStorage.getItem(grantKey)) {
