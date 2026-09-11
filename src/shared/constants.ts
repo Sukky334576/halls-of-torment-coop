@@ -15,6 +15,7 @@ export const GAME_CONSTANTS = {
   // How long a disconnected player's character stays alive (ghosted, untargetable) waiting
   // for them to reconnect (browser refresh, dropped WebSocket) before being removed for real.
   RECONNECT_GRACE_MS: 60_000,
+  GOLD_DROP_CHANCE: 0.022, // 2.2% chance per kill — drops 1 gold coin, scaled by stage.goldMultiplier / Gold Rush Shrine
   MAGNET_DROP_CHANCE: 0.0075, // 0.75% chance per kill (halved from 1.5%, still felt too common) — pulls every EXP gem & gold coin on the map to the team when collected
   // Surrendering is a deliberate choice to bail, not a consequence of difficulty like dying
   // or timing out — those still pay out 100% of collected gold. Keep this in sync with the

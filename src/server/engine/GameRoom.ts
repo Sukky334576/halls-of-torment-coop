@@ -2375,8 +2375,8 @@ export class GameRoom {
         radius: 14
       });
 
-      // Chance to drop Gold (2.2% drop chance, 1 gold scaled by Stage Gold multiplier and Gold Rush Shrine)
-      if (Math.random() < 0.022) {
+      // Chance to drop Gold (1 gold scaled by Stage Gold multiplier and Gold Rush Shrine)
+      if (Math.random() < GAME_CONSTANTS.GOLD_DROP_CHANCE) {
         const hasGoldRush = Array.from(this.players.values()).some((p) => p.shrineBuff?.type === ShrineType.GOLD_RUSH);
         const baseGold = 1;
         const goldMultiplier = stage.goldMultiplier * (hasGoldRush ? 2.0 : 1.0);
