@@ -174,8 +174,8 @@ export const GEAR_CATALOG: Record<string, GearItem> = {
     rarity: 'common',
     icon: '💍',
     stats: { maxHp: 25, pickupRadiusPct: 25 },
-    description: 'Attracts distant soul crystals and gold coins with magnetic ease.',
-    thaiDescription: 'ดูดซับผลึกวิญญาณและเหรียญทองจากระยะไกลเข้าหาตัวผู้สวมใส่'
+    description: 'Attracts distant soul crystals and Soul Coins with magnetic ease.',
+    thaiDescription: 'ดูดซับผลึกวิญญาณและเหรียญวิญญาณจากระยะไกลเข้าหาตัวผู้สวมใส่'
   },
   ring_ruby_eye: {
     id: 'ring_ruby_eye',

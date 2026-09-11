@@ -38,7 +38,7 @@ export class MiniMap {
         <button id="minimap-zoom-btn" class="minimap-zoom-btn" title="Toggle Radar Zoom [M]">1.0x</button>
         <div id="minimap-loot-badge" class="minimap-loot-badge">
           <span class="loot-item loot-gem" title="EXP Gems">💎 <b id="loot-count-gem">0</b></span>
-          <span class="loot-item loot-gold" title="Gold Coins">💰 <b id="loot-count-gold">0</b></span>
+          <span class="loot-item loot-gold" title="Soul Coins">💰 <b id="loot-count-gold">0</b></span>
         </div>
       </div>
     `;

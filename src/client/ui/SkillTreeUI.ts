@@ -376,8 +376,8 @@ export class SkillTreeUI {
 
     if (title) title.textContent = isTh ? 'ยืนยันการปลดล็อก' : 'Confirm Allocation';
     msg.textContent = isTh
-      ? `ปลดล็อก "${namedList}"${nameSuffix} รวม ${count} สกิล ด้วยเหรียญทอง ${totalCost}?`
-      : `Unlock "${namedList}"${nameSuffix} (${count} skill${count > 1 ? 's' : ''}) for ${totalCost} Gold?`;
+      ? `ปลดล็อก "${namedList}"${nameSuffix} รวม ${count} สกิล ด้วยเหรียญวิญญาณ ${totalCost}?`
+      : `Unlock "${namedList}"${nameSuffix} (${count} skill${count > 1 ? 's' : ''}) for ${totalCost} Soul Coins?`;
     modal.style.display = 'flex';
 
     const cleanup = () => {
@@ -408,7 +408,7 @@ export class SkillTreeUI {
     if (title) title.textContent = isTh ? 'ถอนสกิลนี้?' : 'Un-invest this skill?';
     msg.textContent = isTh
       ? `คืนสกิล "${getNodeName(node, 'th')}" รับเหรียญคืน ${refund} จาก ${node.cost} เหรียญ (70%)?`
-      : `Refund "${node.name}" and get ${refund} of ${node.cost} Gold back (70%)?`;
+      : `Refund "${node.name}" and get ${refund} of ${node.cost} Soul Coins back (70%)?`;
     modal.style.display = 'flex';
 
     const cleanup = () => {

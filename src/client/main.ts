@@ -569,7 +569,7 @@ class GameApp {
             if (this.isGameRunning && this.latestTick) {
               const me = this.latestTick.players.find((p) => p.id === this.myId);
               if (me) {
-                this.hud.addFloatingMessage(me.x, me.y - 45, `🎁 +${msg.amount.toLocaleString()} GOLD!`, '#facc15');
+                this.hud.addFloatingMessage(me.x, me.y - 45, `🎁 +${msg.amount.toLocaleString()} SOUL COINS!`, '#facc15');
               }
             }
             break;

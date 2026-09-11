@@ -641,7 +641,7 @@ export class EscMenuUI {
       case ShrineType.SPEED: return isTh ? 'แท่นบูชาความเร็ว (+25% เดินไว)' : 'Shrine of Speed (+25% Move Speed)';
       case ShrineType.FRENZY: return isTh ? 'แท่นบูชาคลุ้มคลั่ง (+30% โจมตีไว)' : 'Shrine of Frenzy (+30% Attack Speed)';
       case ShrineType.AEGIS: return isTh ? 'แท่นบูชาพิทักษ์ (เกราะ & ฟื้นฟูเลือด)' : 'Shrine of Aegis (Armor & Regen)';
-      case ShrineType.GOLD_RUSH: return isTh ? 'แท่นบูชาขุมทอง (เหรียญทอง x2)' : 'Shrine of Gold Rush (Gold x2)';
+      case ShrineType.GOLD_RUSH: return isTh ? 'แท่นบูชาขุมทอง (เหรียญวิญญาณ x2)' : 'Shrine of Gold Rush (Soul Coins x2)';
       case ShrineType.ALTAR_BLOOD: return isTh ? 'แท่นบูชาโลหิต (+35% พลังโจมตีถาวร)' : 'Altar of Blood (+35% Perm Damage)';
       case ShrineType.ALTAR_TEMPEST: return isTh ? 'แท่นบูชาวายุคลั่ง (ออร่าสายฟ้า & +40% วิ่งไว)' : 'Altar of Tempest (Storm Aura & +40% Speed)';
       case ShrineType.ALTAR_VOID: return isTh ? 'แท่นบูชาความว่างเปล่า (บอสพิทักษ์มิติ)' : 'Altar of the Void (Void Guardian)';

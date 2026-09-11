@@ -55,7 +55,7 @@ export class HallOfTrialsUI {
             <span class="modal-icon">📜</span>
             <div>
               <h2 class="modal-title">${isTh ? 'โถงแห่งบททดสอบ (HALL OF TRIALS)' : 'THE HALL OF TRIALS'}</h2>
-              <span class="modal-subtitle">${isTh ? 'บรรลุพันธสัญญาศักดิ์สิทธิ์เพื่อรับทองคำ, ศาสตราโบราณ, และน้ำยาวิเศษถาวร' : 'Conquer sacred ordeals to earn gold, ancient artifacts, and permanent potion capacity'}</span>
+              <span class="modal-subtitle">${isTh ? 'บรรลุพันธสัญญาศักดิ์สิทธิ์เพื่อรับเหรียญวิญญาณ, ศาสตราโบราณ, และน้ำยาวิเศษถาวร' : 'Conquer sacred ordeals to earn Soul Coins, ancient artifacts, and permanent potion capacity'}</span>
             </div>
           </div>
           <button id="btn-close-trials" class="btn-modal-close" title="Close">✕</button>

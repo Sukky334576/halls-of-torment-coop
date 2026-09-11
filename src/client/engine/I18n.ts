@@ -8,7 +8,7 @@ const TRANSLATIONS: TranslationKeys = {
   'game.subtitle': { th: 'ศึกท้าทายความมืด 4 ผู้เล่น (ระบบ 2.5D)', en: '4-PLAYER CO-OP DARK FANTASY CRUSADE (2.5D ENGINE)' },
 
   // Lobby Top Bar
-  'lobby.coins': { th: 'เหรียญทอง', en: 'COINS' },
+  'lobby.coins': { th: 'เหรียญวิญญาณ', en: 'COINS' },
   'lobby.skill_tree_btn': { th: 'ผังทักษะ', en: 'SKILL TREE' },
   'lobby.gear_vault_btn': { th: 'คลังอุปกรณ์', en: 'GEAR VAULT' },
   'lobby.trials_btn': { th: 'บททดสอบ', en: 'TRIALS' },
@@ -42,8 +42,8 @@ const TRANSLATIONS: TranslationKeys = {
   'stage.modal_badge': { th: 'ประตูแห่งความทรมาน — เลือกระดับมิติสมรภูมิ', en: 'GATE OF TORMENT — REALM SELECTION' },
   'stage.modal_title': { th: '⚡ เลือกประตูมิติสู่สมรภูมิ ⚡', en: '⚡ CHOOSE REALM DESTINATION ⚡' },
   'stage.modal_subtitle': {
-    th: 'มอนสเตอร์จะทวีความดุร้ายขึ้นในแต่ละมิติ แต่รางวัลเหรียญทองและค่าประสบการณ์จะคุ้มค่ายิ่งขึ้น!',
-    en: 'Monsters grow deadlier in deeper realms, but Gold and EXP rewards scale significantly!'
+    th: 'มอนสเตอร์จะทวีความดุร้ายขึ้นในแต่ละมิติ แต่รางวัลเหรียญวิญญาณและค่าประสบการณ์จะคุ้มค่ายิ่งขึ้น!',
+    en: 'Monsters grow deadlier in deeper realms, but Soul Coin and EXP rewards scale significantly!'
   },
   'stage.enemies_label': { th: '⚔️ ศัตรู:', en: '⚔️ Foes:' },
   'stage.rewards_label': { th: '💰 รางวัล:', en: '💰 Rewards:' },
@@ -63,8 +63,8 @@ const TRANSLATIONS: TranslationKeys = {
   'stage.2.name': { th: 'ถ้ำเพลิงอเวจี', en: 'The Infernal Caverns' },
   'stage.2.diff': { th: 'ความยาก: ยาก', en: 'DIFFICULTY: HARD' },
   'stage.2.desc': {
-    th: 'โพรงลาวาเดือดพล่าน อุดมด้วยอิมป์เพลิงและหมานรก ศัตรูอึดและตีหนักขึ้น พร้อมดรอปทองมหาศาล',
-    en: 'Boiling subterranean volcanic shafts crawled by fiery fiends. Tougher enemies, significantly higher gold drops.'
+    th: 'โพรงลาวาเดือดพล่าน อุดมด้วยอิมป์เพลิงและหมานรก ศัตรูอึดและตีหนักขึ้น พร้อมดรอปเหรียญวิญญาณมหาศาล',
+    en: 'Boiling subterranean volcanic shafts crawled by fiery fiends. Tougher enemies, significantly higher Soul Coin drops.'
   },
   'stage.2.lock': { th: 'ต้องพิชิตด่านที่ 1 ก่อน', en: 'Must clear Stage 1 first' },
 
@@ -88,8 +88,8 @@ const TRANSLATIONS: TranslationKeys = {
     en: 'The boss proved too powerful — the darkness consumed your party.'
   },
   'gameover.surrender_sub': {
-    th: 'คุณยอมแพ้ถอยทัพ — ได้รับเหรียญทองเพียง 50% จากที่เก็บมาได้',
-    en: 'You surrendered and retreated — only 50% of collected gold is kept.'
+    th: 'คุณยอมแพ้ถอยทัพ — ได้รับเหรียญวิญญาณเพียง 50% จากที่เก็บมาได้',
+    en: 'You surrendered and retreated — only 50% of collected Soul Coins is kept.'
   },
   'hud.boss_slain': {
     th: '🏆 {boss} ถูกกำจัดแล้ว! เวฟต่อไปใน {sec} วิ... 🏆',
@@ -113,7 +113,7 @@ const TRANSLATIONS: TranslationKeys = {
   'shrine.SPEED': { th: '⚡ แท่นบูชาความเร็ว (+25% เดินไว)', en: '⚡ SHRINE OF SPEED (+25% SPD)' },
   'shrine.FRENZY': { th: '⚔️ แท่นบูชาคลุ้มคลั่ง (+30% ตีไว)', en: '⚔️ SHRINE OF FRENZY (+30% ATK SPD)' },
   'shrine.AEGIS': { th: '🛡️ แท่นบูชาพิทักษ์ (เกราะ & ฟื้นเลือด)', en: '🛡️ SHRINE OF AEGIS (SHIELD & REGEN)' },
-  'shrine.GOLD_RUSH': { th: '💰 แท่นบูชาขุมทอง (ทอง x2)', en: '💰 SHRINE OF GOLD RUSH (2X GOLD)' },
+  'shrine.GOLD_RUSH': { th: '💰 แท่นบูชาขุมทอง (เหรียญวิญญาณ x2)', en: '💰 SHRINE OF GOLD RUSH (2X SOUL COINS)' },
   'shrine.ALTAR_BLOOD': { th: '🩸 แท่นบูชาโลหิต (สละ 30% HP แลก +35% พลังโจมตีถาวร)', en: '🩸 ALTAR OF BLOOD (Sacrifice 30% HP for +35% Perm DMG)' },
   'shrine.ALTAR_TEMPEST': { th: '⚡ แท่นบูชาวายุคลั่ง (ออร่าสายฟ้าฟาด & +40% วิ่งไว 45วิ)', en: '⚡ ALTAR OF TEMPEST (Storm Lightning & +40% Speed for 45s)' },
   'shrine.ALTAR_VOID': { th: '🌌 แท่นบูชาความว่างเปล่า (อัญเชิญบอสพิทักษ์มิติ รับรางวัลสูงสุด)', en: '🌌 ALTAR OF THE VOID (Summons Void Guardian Boss for Epic Loot)' },
@@ -143,7 +143,7 @@ const TRANSLATIONS: TranslationKeys = {
   'gameover.defeat_sub': { th: 'ความมืดแห่งแดนทรมานได้กลืนกินปาร์ตี้ของคุณแล้ว', en: 'THE TORMENT HAS CONSUMED YOUR PARTY' },
   'gameover.time': { th: 'เวลาที่เอาชีวิตรอด:', en: 'Survival Time:' },
   'gameover.kills': { th: 'ศัตรูที่กำจัดได้:', en: 'Total Enemies Slain:' },
-  'gameover.gold': { th: 'เหรียญทองที่คว้ามาได้:', en: 'Gold Secured:' },
+  'gameover.gold': { th: 'เหรียญวิญญาณที่คว้ามาได้:', en: 'Soul Coins Secured:' },
   'gameover.btn_retry': { th: 'กลับสู่ล็อบบี้ (RETURN TO HUB)', en: 'RETURN TO HUB' },
 
   // Classes Localized Names & Titles
@@ -226,7 +226,7 @@ const TRANSLATIONS: TranslationKeys = {
     en: 'Master of luck and fortune throwing razor playing cards, tossing loaded fate dice, and triggering slot machine 777 jackpots.'
   },
   'class.gambler.weapon': { th: 'ไพ่ทาโรต์สังหาร', en: 'Arcane Playing Cards' },
-  'class.gambler.spec': { th: 'ปาไพ่เป็นพัด, ทอดลูกเต๋าเสี่ยงทาย, แจ็กพอต 777 โปรยทอง', en: 'Fan of Razor Cards, Fate Dice Explosion & 777 Jackpot Rain' },
+  'class.gambler.spec': { th: 'ปาไพ่เป็นพัด, ทอดลูกเต๋าเสี่ยงทาย, แจ็กพอต 777 โปรยเหรียญวิญญาณ', en: 'Fan of Razor Cards, Fate Dice Explosion & 777 Jackpot Rain' },
 
   // ESC Menu Translations
   'esc.title': { th: 'เมนูพักรบ & ข้อมูลสมรภูมิ', en: 'BATTLE CODEX & PAUSE' },
@@ -255,15 +255,15 @@ const TRANSLATIONS: TranslationKeys = {
   'esc.stage_title': { th: 'สมรภูมิปัจจุบัน:', en: 'Current Realm:' },
   'esc.time_survived': { th: 'เวลาที่เอาชีวิตรอด:', en: 'Time Survived:' },
   'esc.kills': { th: 'ศัตรูที่สังหาร:', en: 'Monsters Slain:' },
-  'esc.gold': { th: 'เหรียญทองของทีม:', en: 'Team Gold:' },
+  'esc.gold': { th: 'เหรียญวิญญาณของทีม:', en: 'Team Soul Coins:' },
   
   'esc.btn_resume': { th: '▶️ กลับสู่การรบ (RESUME)', en: '▶️ Resume Crusade' },
   'esc.btn_surrender': { th: '🏳️ กดยอมแพ้ / ถอยทัพ', en: '🏳️ Surrender / Abandon' },
   
   'esc.confirm_surrender_title': { th: '⚠️ ยืนยันการถอยทัพยอมแพ้?', en: '⚠️ Confirm Surrender?' },
   'esc.confirm_surrender_msg': {
-    th: 'คุณแน่ใจหรือไม่ที่จะยอมแพ้? เหรียญทองและสถิติที่เก็บได้ในรอบนี้จะถูกนำกลับไปยังล็อบบี้อย่างปลอดภัย',
-    en: 'Are you sure you want to abandon the crusade? Gold earned in this run will be safely brought back to Sanctuary.'
+    th: 'คุณแน่ใจหรือไม่ที่จะยอมแพ้? เหรียญวิญญาณและสถิติที่เก็บได้ในรอบนี้จะถูกนำกลับไปยังล็อบบี้อย่างปลอดภัย',
+    en: 'Are you sure you want to abandon the crusade? Soul Coins earned in this run will be safely brought back to Sanctuary.'
   },
   'esc.btn_confirm_surrender': { th: 'ยอมแพ้ทันที', en: 'Surrender Now' },
   'esc.btn_cancel_surrender': { th: 'กลับไปสู้ต่อ', en: 'Keep Fighting' },

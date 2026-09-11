@@ -120,8 +120,8 @@ if (PARTY_CODE) {
 
 export function grantGoldToAll(amount: number): { success: boolean; amount: number; activePlayers: number; grantId: string } {
   const grantId = `grant_${Date.now()}`;
-  const thaiMsg = `🎁 ของขวัญจากเซิร์ฟเวอร์: ได้รับ ${amount.toLocaleString()} Gold Coins เรียบร้อย!`;
-  const engMsg = `🎁 Server Reward: ${amount.toLocaleString()} Gold Coins awarded!`;
+  const thaiMsg = `🎁 ของขวัญจากเซิร์ฟเวอร์: ได้รับ ${amount.toLocaleString()} เหรียญวิญญาณ เรียบร้อย!`;
+  const engMsg = `🎁 Server Reward: ${amount.toLocaleString()} Soul Coins awarded!`;
 
   const msg: ServerMessage = {
     type: 'GRANT_GOLD',

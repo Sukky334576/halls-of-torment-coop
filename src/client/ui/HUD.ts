@@ -775,7 +775,7 @@ export class HUD {
         return {
           icon: '🎲',
           name: isTh ? 'ลูกเต๋าเสี่ยงโชค (Lucky Dice)' : 'Lucky Dice',
-          desc: isTh ? 'โยนลูกเต๋าเสี่ยงดวงระเบิดวงกว้าง + แจ็กพอตเหรียญทอง' : 'Tosses lucky dice explosive + chance for jackpot gold'
+          desc: isTh ? 'โยนลูกเต๋าเสี่ยงดวงระเบิดวงกว้าง + แจ็กพอตเหรียญวิญญาณ' : 'Tosses lucky dice explosive + chance for jackpot Soul Coins'
         };
       default:
         return { icon: '✨', name: isTh ? 'สกิลติดตัว' : 'Innate Skill', desc: '' };

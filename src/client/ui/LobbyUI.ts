@@ -1500,11 +1500,11 @@ export class LobbyUI {
               </div>
               <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px; gap: 8px;">
                 <button id="btn-buy-hero" class="btn-buy-hero ${canBuy ? '' : 'disabled'}" ${canBuy ? '' : 'disabled'}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style="vertical-align: -2px; margin-right: 4px;"><circle cx="12" cy="12" r="10" fill="#ffd166" stroke="#b45309" stroke-width="2"/><circle cx="12" cy="12" r="7" stroke="#d97706" stroke-width="1.5" stroke-dasharray="2 2"/><text x="12" y="16" font-family="'Cinzel', serif" font-size="11" font-weight="900" fill="#78350f" text-anchor="middle">G</text></svg>
-                  ${isTh ? `ซื้อตัวละคร (${req.price.toLocaleString()} ทอง)` : `Unlock Hero (${req.price.toLocaleString()} Gold)`}
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style="vertical-align: -2px; margin-right: 4px;"><circle cx="12" cy="12" r="10" fill="#ffd166" stroke="#b45309" stroke-width="2"/><circle cx="12" cy="12" r="7" stroke="#d97706" stroke-width="1.5" stroke-dasharray="2 2"/><text x="12" y="16" font-family="'Cinzel', serif" font-size="11" font-weight="900" fill="#78350f" text-anchor="middle">S</text></svg>
+                  ${isTh ? `ซื้อตัวละคร (${req.price.toLocaleString()} เหรียญวิญญาณ)` : `Unlock Hero (${req.price.toLocaleString()} Soul Coins)`}
                 </button>
                 <span style="font-size: 0.74rem; font-weight: 600; color: ${hasCoins ? '#c5a059' : '#ef4444'};">
-                  ${isTh ? `ทองของคุณ: ${MetaProgression.getCoins().toLocaleString()} / ${req.price.toLocaleString()}` : `Your Gold: ${MetaProgression.getCoins().toLocaleString()} / ${req.price.toLocaleString()}`}
+                  ${isTh ? `เหรียญวิญญาณของคุณ: ${MetaProgression.getCoins().toLocaleString()} / ${req.price.toLocaleString()}` : `Your Soul Coins: ${MetaProgression.getCoins().toLocaleString()} / ${req.price.toLocaleString()}`}
                 </span>
               </div>
             </div>
@@ -1602,7 +1602,7 @@ export class LobbyUI {
               </div>
               <div class="stage-stat-row">
                 <span class="stat-lbl">${I18n.t('stage.rewards_label')}</span>
-                <span class="stat-val ${unlocked ? 'stat-gold' : ''}">EXP x${stage.expMultiplier} / ${isTh ? 'ทอง' : 'Gold'} x${stage.goldMultiplier}</span>
+                <span class="stat-val ${unlocked ? 'stat-gold' : ''}">EXP x${stage.expMultiplier} / ${isTh ? 'เหรียญวิญญาณ' : 'Soul Coins'} x${stage.goldMultiplier}</span>
               </div>
             </div>
 

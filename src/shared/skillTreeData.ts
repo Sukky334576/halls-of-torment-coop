@@ -4876,8 +4876,8 @@ export const CLASS_SKILL_TREES: Record<string, ClassSkillTree> = {
         x: 207,
         y: 633,
         connections: ['cow_bounty_minor_2', 'cow_gold_pouch', 'cow_bounty_filler'],
-        description: 'NOTABLE: Marks elite monsters with bounties. Slain bounties drop gold and boost party damage.',
-        descriptionTh: 'ทักษะเด่น: ตราหน้ามอนสเตอร์ระดับเอลีทเป็นเป้าล่าค่าหัว เมื่อฆ่าได้จะดรอปทองและเพิ่มดาเมจให้ทั้งทีม',
+        description: 'NOTABLE: Marks elite monsters with bounties. Slain bounties drop Soul Coins and boost party damage.',
+        descriptionTh: 'ทักษะเด่น: ตราหน้ามอนสเตอร์ระดับเอลีทเป็นเป้าล่าค่าหัว เมื่อฆ่าได้จะดรอปเหรียญวิญญาณและเพิ่มดาเมจให้ทั้งทีม',
         signatureSkillId: 'cowboy_hollow_point',
         stats: { damageBonus: 2 }
       },
@@ -4899,8 +4899,8 @@ export const CLASS_SKILL_TREES: Record<string, ClassSkillTree> = {
       },
       cow_gold_pouch: {
         id: 'cow_gold_pouch',
-        name: 'Outlaw Gold Bag',
-        nameTh: 'ถุงทองนอกกฎหมาย',
+        name: 'Outlaw Soul Bag',
+        nameTh: 'ถุงวิญญาณนอกกฎหมาย',
         type: 'minor',
         classType: PlayerClass.COWBOY,
         icon: '💰',
@@ -4908,8 +4908,8 @@ export const CLASS_SKILL_TREES: Record<string, ClassSkillTree> = {
         x: 64,
         y: 750,
         connections: ['cowboy_hollow_point', 'cow_gold_pouch_2'],
-        description: '+13% Item and gold pickup radius with +8 Max HP.',
-        descriptionTh: '+13% รัศมีเก็บไอเทมและทอง พร้อม +8 พลังชีวิตสูงสุด',
+        description: '+13% Item and Soul Coin pickup radius with +8 Max HP.',
+        descriptionTh: '+13% รัศมีเก็บไอเทมและเหรียญวิญญาณ พร้อม +8 พลังชีวิตสูงสุด',
         stats: { pickupRadius: 1, maxHp: 8 }
       },
       cow_gold_pouch_2: {
@@ -4923,8 +4923,8 @@ export const CLASS_SKILL_TREES: Record<string, ClassSkillTree> = {
         x: 225,
         y: 796,
         connections: ['cow_gold_pouch', 'cow_legend_west'],
-        description: '+12% Item and gold pickup radius with +7 Max HP.',
-        descriptionTh: '+12% รัศมีเก็บไอเทมและทอง พร้อม +7 พลังชีวิตสูงสุด',
+        description: '+12% Item and Soul Coin pickup radius with +7 Max HP.',
+        descriptionTh: '+12% รัศมีเก็บไอเทมและเหรียญวิญญาณ พร้อม +7 พลังชีวิตสูงสุด',
         stats: { pickupRadius: 1, maxHp: 7 }
       },
       cow_gunslinger_stride: {
@@ -6051,8 +6051,8 @@ export const CLASS_SKILL_TREES: Record<string, ClassSkillTree> = {
         x: 288,
         y: 575,
         connections: ['gam_greed_minor', 'gambler_fortune_greed'],
-        description: '+7 Max HP and gold coins picked up grant +5% speed for 4s.',
-        descriptionTh: '+7 พลังชีวิตสูงสุด และเก็บเหรียญทองจะได้ความเร็ว +5% นาน 4 วินาที',
+        description: '+7 Max HP and Soul Coins picked up grant +5% speed for 4s.',
+        descriptionTh: '+7 พลังชีวิตสูงสุด และเก็บเหรียญวิญญาณจะได้ความเร็ว +5% นาน 4 วินาที',
         stats: { maxHp: 7 }
       },
       gam_luck_minor: {
@@ -6096,8 +6096,8 @@ export const CLASS_SKILL_TREES: Record<string, ClassSkillTree> = {
         x: 207,
         y: 633,
         connections: ['gam_greed_minor_2', 'gam_vault_ante', 'gam_fortune_filler'],
-        description: 'NOTABLE: Card hits have a chance to extract gold coins from monsters and vacuum them instantly.',
-        descriptionTh: 'ทักษะเด่น: การโจมตีด้วยไพ่มีโอกาสดึงเหรียญทองออกจากมอนสเตอร์และดูดเข้าตัวทันที',
+        description: 'NOTABLE: Card hits have a chance to extract Soul Coins from monsters and vacuum them instantly.',
+        descriptionTh: 'ทักษะเด่น: การโจมตีด้วยไพ่มีโอกาสดึงเหรียญวิญญาณออกจากมอนสเตอร์และดูดเข้าตัวทันที',
         signatureSkillId: 'gambler_fortune_greed',
         stats: { pickupRadius: 2 }
       },
@@ -6119,7 +6119,7 @@ export const CLASS_SKILL_TREES: Record<string, ClassSkillTree> = {
       gam_coin_storm: {
         id: 'gam_coin_storm',
         name: 'Golden Shrapnel',
-        nameTh: 'สะเก็ดเหรียญทอง',
+        nameTh: 'สะเก็ดเหรียญวิญญาณ',
         type: 'notable',
         classType: PlayerClass.GAMBLER,
         icon: '💰',
@@ -6127,8 +6127,8 @@ export const CLASS_SKILL_TREES: Record<string, ClassSkillTree> = {
         x: 721,
         y: 692,
         connections: ['gam_luck_minor_2', 'gam_all_in', 'gam_coinstorm_filler'],
-        description: 'NOTABLE: Picking up gold coins releases ricocheting gold sparks that damage nearby enemies.',
-        descriptionTh: 'ทักษะเด่น: การเก็บเหรียญทองจะปล่อยประกายทองที่สะท้อนไปทำดาเมจศัตรูรอบตัว',
+        description: 'NOTABLE: Picking up Soul Coins releases ricocheting gold sparks that damage nearby enemies.',
+        descriptionTh: 'ทักษะเด่น: การเก็บเหรียญวิญญาณจะปล่อยประกายทองที่สะท้อนไปทำดาเมจศัตรูรอบตัว',
         stats: { damageBonus: 2 }
       },
       gam_coinstorm_filler: {
