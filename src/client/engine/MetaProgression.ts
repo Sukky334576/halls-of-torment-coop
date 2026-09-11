@@ -721,10 +721,10 @@ export class MetaProgressionManager {
     this.data.claimedTrialIds.push(trialId);
 
     // Grant Reward
+    // Gear is never a trial reward — it must only ever come from monster drops in-run, so
+    // there's deliberately no 'GEAR' case here (see trialQuests.ts's TrialRewardType).
     if (quest.rewardType === 'GOLD') {
       this.addCoins(quest.rewardValue as number);
-    } else if (quest.rewardType === 'GEAR') {
-      this.addGearToVault(quest.rewardValue as string);
     } else if (quest.rewardType === 'POTION_REROLL') {
       this.data.extraPotions.rerolls += quest.rewardValue as number;
     } else if (quest.rewardType === 'POTION_BANISH') {

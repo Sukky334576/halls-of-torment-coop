@@ -6,7 +6,10 @@ export type TrialGoalType =
   | 'GOLD_COLLECTED'
   | 'STAGE_CLEARED';
 
-export type TrialRewardType = 'GOLD' | 'GEAR' | 'POTION_REROLL' | 'POTION_BANISH' | 'POTION_LOCK';
+// Gear is deliberately not a reward type here — equipment must only ever come from monster
+// drops during a run (see GameRoom.ts's damageMonster gear-drop roll), never from a one-time
+// account-wide achievement, so trial quests only ever pay out currency/potions.
+export type TrialRewardType = 'GOLD' | 'POTION_REROLL' | 'POTION_BANISH' | 'POTION_LOCK';
 
 export interface TrialQuest {
   id: string;
@@ -35,8 +38,8 @@ export const TRIAL_QUESTS: TrialQuest[] = [
     target: 100,
     rewardType: 'GOLD',
     rewardValue: 40,
-    rewardLabel: '+40 Gold Coins',
-    thaiRewardLabel: '+40 เหรียญทอง'
+    rewardLabel: '+40 Soul Coins',
+    thaiRewardLabel: '+40 เหรียญวิญญาณ'
   },
   {
     id: 'trial_slayer_500',
@@ -47,10 +50,10 @@ export const TRIAL_QUESTS: TrialQuest[] = [
     icon: '⚔️',
     goalType: 'KILLS',
     target: 500,
-    rewardType: 'GEAR',
-    rewardValue: 'ring_ruby_eye',
-    rewardLabel: 'Rare Gear: Ruby Eye Ring',
-    thaiRewardLabel: 'ไอเทมระดับแรร์: แหวนเนตรทับทิมโลหิต'
+    rewardType: 'GOLD',
+    rewardValue: 150,
+    rewardLabel: '+150 Soul Coins',
+    thaiRewardLabel: '+150 เหรียญวิญญาณ'
   },
   {
     id: 'trial_survivor_5m',
@@ -89,10 +92,10 @@ export const TRIAL_QUESTS: TrialQuest[] = [
     icon: '⚡',
     goalType: 'EVOLUTIONS',
     target: 1,
-    rewardType: 'GEAR',
-    rewardValue: 'amulet_wellkeepers_pendant',
-    rewardLabel: "Unique Gear: The Wellkeeper's Relic",
-    thaiRewardLabel: 'ไอเทมระดับยูนีค: สร้อยโบราณผู้พิทักษ์บ่อน้ำ'
+    rewardType: 'GOLD',
+    rewardValue: 250,
+    rewardLabel: '+250 Soul Coins',
+    thaiRewardLabel: '+250 เหรียญวิญญาณ'
   },
   {
     id: 'trial_elemental_20',
@@ -112,15 +115,15 @@ export const TRIAL_QUESTS: TrialQuest[] = [
     id: 'trial_gold_50',
     title: 'Wealth of the Damned',
     thaiTitle: 'ขุมทรัพย์คนบาป',
-    desc: 'Accumulate a total of 50 gold coins.',
-    thaiDesc: 'เก็บสะสมเหรียญทองรวม 50 เหรียญ',
+    desc: 'Accumulate a total of 50 soul coins.',
+    thaiDesc: 'เก็บสะสมเหรียญวิญญาณรวม 50 เหรียญ',
     icon: '💰',
     goalType: 'GOLD_COLLECTED',
     target: 50,
     rewardType: 'GOLD',
     rewardValue: 60,
-    rewardLabel: '+60 Gold Coins',
-    thaiRewardLabel: '+60 เหรียญทอง'
+    rewardLabel: '+60 Soul Coins',
+    thaiRewardLabel: '+60 เหรียญวิญญาณ'
   },
   {
     id: 'trial_stage_cleared',
@@ -131,10 +134,10 @@ export const TRIAL_QUESTS: TrialQuest[] = [
     icon: '👑',
     goalType: 'STAGE_CLEARED',
     target: 1,
-    rewardType: 'GEAR',
-    rewardValue: 'chest_aegis_titan',
-    rewardLabel: "Unique Gear: Titan's Bastion Cuirass",
-    thaiRewardLabel: 'ไอเทมระดับยูนีค: เกราะอกป้อมปราการไททัน'
+    rewardType: 'GOLD',
+    rewardValue: 200,
+    rewardLabel: '+200 Soul Coins',
+    thaiRewardLabel: '+200 เหรียญวิญญาณ'
   }
 ];
 
