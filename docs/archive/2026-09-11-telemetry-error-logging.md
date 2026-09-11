@@ -195,3 +195,49 @@ string interpolation ล้วน ยืนยันซ้ำด้วย payloa
 
 `GAME_WIKI.md` (§5.7.1 ใหม่, risk #25 แก้แล้ว, Change Log), `GAME_BLUEPRINT.md` (Roadmap #25 แก้แล้ว,
 Known Design Decision ใหม่เรื่อง `ADMIN_SECRET`, Change Log)
+
+---
+
+## Round 3.1 — Dashboard เปิดไม่ได้จริงหลัง deploy (2026-09-12, ต่อจาก Round 3 ทันที)
+
+Deploy round 3 (dashboard) เสร็จแล้ว รายงาน user ว่าใช้งานได้ — user แจ้งกลับทันทีว่าเข้าหน้า dashboard
+ไม่ได้จริง
+
+### Root cause (ยืนยันจาก source จริง ไม่ใช่เดา)
+
+ตอน verify ก่อนหน้านี้ทั้งหมดยิง `curl 127.0.0.1:8080` ตรงเข้า Node process — **ไม่เคยเช็คผ่าน nginx
+เลยสักครั้ง** (เส้นทางจริงที่ user ใช้จากเบราว์เซอร์) เช็ค `/etc/nginx/sites-enabled/*` พบว่า nginx
+proxy แค่ `location /ws` กับ `location /api/` มาที่ Node เท่านั้น เส้นทางอื่นทั้งหมดใช้
+`root /opt/halls-of-torment-coop/dist; try_files $uri $uri/ /index.html;` (เสิร์ฟ game client
+เอง) — route เดิม `GET /admin/telemetry` อยู่นอก `/api/` เลยไม่เคยไปถึง Node handler จริงบน
+production เลย nginx เสิร์ฟหน้า login ของเกมแทนแบบเงียบๆ (ไม่มี error ให้เห็นเลยด้วย เพราะ
+`try_files` fallback ไป `index.html` สำเร็จ ได้ HTTP 200 ปกติ)
+
+### Fix
+
+ย้าย route หน้า dashboard จาก `GET /admin/telemetry` เป็น **`GET /api/admin/telemetry/dashboard`**
+(อยู่ใต้ `/api/` prefix ที่ nginx proxy อยู่แล้ว) ไม่ต้องแก้ nginx config/reload เลย — เปลี่ยนแค่โค้ด
+`server.ts` บรรทัดเดียว (route matching) เท่านั้น
+
+### Test — คราวนี้ผ่าน proxy จริง ไม่ใช่ยิงตรง backend
+
+รอบก่อนพลาดเพราะ test ตรงเข้า `127.0.0.1:8080` ทั้งหมด — รอบนี้จำลอง proxy layer ให้ตรงกับของจริง:
+- Local: รัน `npm run dev` (Vite dev server, proxy `/api/` ตาม `vite.config.ts`) คู่กับ
+  `npm run server` แล้วยิง `curl http://localhost:3000/...` (ผ่าน Vite proxy) แทนที่จะยิง port 8080
+  ตรงๆ — ยืนยัน: path ใหม่ `/api/admin/telemetry/dashboard` ผ่าน proxy ได้ `HTTP 200` +
+  `content-type: text/html` ถูกต้อง, path เดิม `/admin/telemetry` ผ่าน proxy คืน HTML ของ Vite/game
+  client จริง (reproduce บั๊กเดิมได้ใน local ก่อนแก้)
+- เปิดจริงผ่าน browser ที่ `http://localhost:3000/api/admin/telemetry/dashboard` — title tab ขึ้น
+  "Torment of Souls — Telemetry Dashboard" ถูกต้อง (ไม่ใช่หน้าเกม), auth gate แสดงผลปกติ
+- `npx tsc --noEmit` ✅, `npx vitest run` ✅ 73/73, `npm run build` ✅
+
+### บทเรียน
+
+เวลา verify route ใหม่ที่จะขึ้น production **ต้องทดสอบผ่าน reverse proxy จริง** (nginx บน production,
+Vite dev server บน local) ไม่ใช่ยิงตรงเข้า backend process — ยิงตรงพลาดจุดนี้ไปได้ง่ายเพราะ backend
+เองไม่มีปัญหาอะไรเลย ปัญหาอยู่ที่ routing layer ข้างหน้าทั้งหมด
+
+### เอกสารที่อัปเดตเพิ่ม
+
+`GAME_WIKI.md` (§5.7.1 แก้ URL + เพิ่มคำอธิบาย root cause, risk #25 อัปเดต, Change Log), `GAME_BLUEPRINT.md`
+(Roadmap #25 อัปเดต URL, Change Log)

@@ -18,6 +18,7 @@
 | 2026-09-11 | เพิ่มระบบ Telemetry & Error Logging ใหม่ทั้งระบบ — เพิ่ม Flow 4 (B.2), telemetry ER entities (B.4), Refactor Roadmap Phase 3 items ใหม่ #23-25 (B.5), Known Design Decisions 2 ข้อใหม่เรื่อง no-auth endpoint + crash-then-exit (B.6) | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-11 | Risk audit หลังพัฒนา telemetry (user ขอ "ลดความเสี่ยงให้ต่ำที่สุด"): #23 no-auth endpoint ลดความเสี่ยงด้วย rate limit, เพิ่ม `run_end` ให้ co-op surrender, เพิ่ม `checkMonsterSanity()` — renumber Roadmap #23-24 เดิม (retention/dashboard) เป็น #24-25 ให้ตรงกับ GAME_WIKI.md (เจอ numbering ไม่ตรงกันระหว่าง 2 เอกสารตอน sync รอบนี้ แก้ให้ตรงแล้ว) | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | เพิ่ม Telemetry Dashboard (แก้ Roadmap #25) — พบและแก้ stored-XSS จริงระหว่างทดสอบ (draft แรก render error message ผ่าน `innerHTML`) เพิ่ม Known Design Decision เรื่อง `ADMIN_SECRET` แยกจาก `JWT_SECRET` | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | Dashboard เปิดไม่ได้หลัง deploy จริง — route เดิมอยู่นอก `/api/` ที่ nginx proxy มา Node เลยโดน SPA catch-all ของ game client เสิร์ฟหน้า login แทนเงียบๆ ย้าย route เป็น `/api/admin/telemetry/dashboard` | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 >
 > สร้างเมื่อ 2026-09-11
 
@@ -329,7 +330,7 @@ erDiagram
 | 18 | vaultInventory ไม่มี cap (§2.6) | เพิ่ม `MAX_VAULT_SIZE` constant + เช็คก่อน push (ถ้าต้องการ) | **S** |
 | 23 | ✅ **ลดความเสี่ยงแล้ว 2026-09-11** — ~~`/api/telemetry/events`/`/errors` ไม่มี auth เลย~~ (§5.8, ใหม่) | เพิ่ม `isTelemetryRateLimited()` (`server.ts`) — 40 req/60วิ ต่อ IP แยก limiter จาก `auth.ts`'s login limiter (threshold คนละแบบ) คู่กับ payload cap เดิม — ทดสอบผ่าน curl (40×200 ตามด้วย 429 ต่อเนื่อง) ยืนยันแล้ว | **S** — เสร็จแล้ว |
 | 24 | `telemetry.db` ไม่มี retention/prune policy (§5.8, ใหม่) | เพิ่ม cron/startup job ลบ `game_events`/`error_log` เก่ากว่า N วัน (N ยังไม่กำหนด — รอ user ตัดสินใจ retention window) | **S** — ยังไม่ทำ ตั้งใจเลื่อนไว้ก่อนตามที่ระบุใน spec |
-| 25 | ✅ **แก้แล้ว 2026-09-12** — ~~ไม่มี dashboard อ่าน telemetry~~ (§5.7.1, §5.8) | `/admin/telemetry` (static page) + `GET /api/admin/telemetry/summary` (auth: `ADMIN_SECRET` header) — ระหว่างทดสอบพบ stored-XSS จริง (draft แรก render error message ผ่าน `innerHTML` จาก endpoint ที่ไม่มี auth) แก้เป็น `textContent` + เพิ่ม whitelist validation ที่ ingest endpoint | **M** — เสร็จแล้ว |
+| 25 | ✅ **แก้แล้ว 2026-09-12** — ~~ไม่มี dashboard อ่าน telemetry~~ (§5.7.1, §5.8) | `GET /api/admin/telemetry/dashboard` (static page, ย้ายมาจาก `/admin/telemetry` เดิมหลัง deploy พบว่า nginx ไม่ proxy เส้นทางนอก `/api/`/`/ws` มา Node เลย) + `GET /api/admin/telemetry/summary` (auth: `ADMIN_SECRET` header) — ระหว่างทดสอบพบ stored-XSS จริง (draft แรก render error message ผ่าน `innerHTML` จาก endpoint ที่ไม่มี auth) แก้เป็น `textContent` + เพิ่ม whitelist validation ที่ ingest endpoint | **M** — เสร็จแล้ว |
 
 ---
 

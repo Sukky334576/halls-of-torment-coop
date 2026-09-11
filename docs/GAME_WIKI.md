@@ -17,7 +17,8 @@
 | 2026-09-11 | Risk audit หลังแก้ #21: เปลี่ยน RETURN_TO_HUB จาก fixed-delay (150ms) เป็น ack-based (`RETURN_TO_HUB_ACK` + fallback timeout 800ms) + พบและแก้ risk ใหม่ #22 (`requireAuth` ไม่เช็คว่า user ยังมีอยู่จริง ทำ `POST /api/progression` พังแบบ unhandled 500 ถ้า token เก่ากว่า DB) | `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md` |
 | 2026-09-11 | เพิ่มระบบ Telemetry & Error Logging ใหม่ทั้งระบบ (`telemetry.db` แยกจาก `game.db`, ตาราง `game_events`+`error_log`, `TelemetryBuffer` batched flush, capture point ฝั่ง server 6 event type + client error capture) — ดู §5.7-5.8 ใหม่ + risk #23, #24 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-11 | Risk audit หลังพัฒนา telemetry (user ขอ "ลดความเสี่ยงให้ต่ำที่สุด"): เพิ่ม per-IP rate limit บน telemetry endpoint (แก้ risk #23), เพิ่ม `run_end` ให้ผู้เล่น co-op ที่ surrender ระหว่างทีมเล่นต่อด้วย (เดิมไม่มี), เพิ่ม `checkMonsterSanity()` คู่กับ `checkPlayerSanity()` เดิม | `docs/archive/2026-09-11-telemetry-error-logging.md` |
-| 2026-09-12 | เพิ่ม Telemetry Dashboard (`/admin/telemetry` + `GET /api/admin/telemetry/summary`, auth: `ADMIN_SECRET`) แก้ risk #25 — ระหว่างทดสอบพบ stored-XSS ในตาราง error ของ dashboard (draft แรกใช้ `innerHTML` render ค่าจาก endpoint ที่ไม่มี auth) แก้เป็น `textContent` ทันที + เพิ่ม category/event_type whitelist validation ที่ ingest endpoint เป็นชั้นป้องกันที่สอง — ดู §5.7.1 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | เพิ่ม Telemetry Dashboard (`GET /api/admin/telemetry/dashboard` + `GET /api/admin/telemetry/summary`, auth: `ADMIN_SECRET`) แก้ risk #25 — ระหว่างทดสอบพบ stored-XSS ในตาราง error ของ dashboard (draft แรกใช้ `innerHTML` render ค่าจาก endpoint ที่ไม่มี auth) แก้เป็น `textContent` ทันที + เพิ่ม category/event_type whitelist validation ที่ ingest endpoint เป็นชั้นป้องกันที่สอง — ดู §5.7.1 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | หลัง deploy รอบแรกของ dashboard เปิดหน้าไม่ได้จริง — root cause: route เดิม `/admin/telemetry` อยู่นอก `/api/` ที่ nginx proxy มา Node เลยโดน SPA catch-all ของ game client เสิร์ฟหน้า login แทนเงียบๆ ย้าย route มาเป็น `/api/admin/telemetry/dashboard` แทน ไม่ต้องแก้ nginx | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 
 ## สารบัญ
 
@@ -723,9 +724,14 @@ route ใหม่ใน `server.ts`
 หน้าเว็บ internal สำหรับดูภาพรวม `game_events`/`error_log` — ไม่มี dashboard มาก่อน (เดิม risk #25
 บอกว่าต้องอ่านผ่าน SQLite client ตรงๆ) ตอนนี้แก้แล้ว:
 
-- **`GET /admin/telemetry`** — หน้า dashboard (static HTML, เสิร์ฟตรงจาก server เดิม อ่านไฟล์สดทุก
-  request ไม่ cache เพราะเป็น internal tool ที่ไม่ได้ถูกเรียกบ่อย) ตัวหน้าเองไม่มี auth (ไม่มีอะไร
-  sensitive อยู่ใน markup) แต่การดึงข้อมูลจริงข้างในต้องผ่าน auth
+- **`GET /api/admin/telemetry/dashboard`** — หน้า dashboard (static HTML, เสิร์ฟตรงจาก server เดิม
+  อ่านไฟล์สดทุก request ไม่ cache เพราะเป็น internal tool ที่ไม่ได้ถูกเรียกบ่อย) ตัวหน้าเองไม่มี auth
+  (ไม่มีอะไร sensitive อยู่ใน markup) แต่การดึงข้อมูลจริงข้างในต้องผ่าน auth **เส้นทางนี้ต้องอยู่ใต้
+  `/api/` เท่านั้น** — nginx (ดู deploy config) proxy แค่ `/ws` กับ `/api/` มาที่ Node process นี้
+  เส้นทางอื่นทั้งหมดตกไปที่ SPA catch-all ของ game client (`try_files $uri $uri/ /index.html`) draft
+  แรกวาง route ไว้ที่ `/admin/telemetry` (นอก `/api/`) — deploy ไปแล้วพบว่าเปิดไม่ได้จริง เพราะ nginx
+  เสิร์ฟหน้า login ของเกมแทนเงียบๆ (ไม่ error ให้เห็นด้วย) แก้โดยย้าย route มาไว้ใต้ `/api/` แทน ไม่ต้อง
+  แก้ nginx config เลย
 - **`GET /api/admin/telemetry/summary`** — endpoint เดียวคืนสรุปทั้งหมด (event count ต่อ type, death
   cause breakdown, wave distribution, card pick rate ต่อ rarity, run outcome breakdown, average
   playtime, error summary) คำนวณจาก `getEventSummary()`/`getErrorSummary()`
@@ -795,7 +801,7 @@ whitelist ที่ `server.ts`'s ingest endpoint ปฏิเสธ category/ev
 17. Duplicated "หา nearest player" logic ใน boss abilities 4 จุด (§3.7) — ยังไม่แก้
 18. vaultInventory ไม่มี cap (§2.6) — ยังไม่แก้
 24. `telemetry.db` ไม่มี retention/prune policy (§5.8) — ตั้งใจไม่ทำตอนนี้ (friend-testing scale) — ยังไม่แก้
-25. ~~ไม่มี dashboard อ่าน telemetry~~ (§5.7.1) — **✅ แก้แล้ว 2026-09-12**: `/admin/telemetry` + `GET /api/admin/telemetry/summary` (auth: `ADMIN_SECRET`) — ระหว่างทำพบ stored-XSS ใน draft แรก แก้แล้ว (ดู §5.7.1)
+25. ~~ไม่มี dashboard อ่าน telemetry~~ (§5.7.1) — **✅ แก้แล้ว 2026-09-12**: `GET /api/admin/telemetry/dashboard` + `GET /api/admin/telemetry/summary` (auth: `ADMIN_SECRET`) — ระหว่างทำพบ stored-XSS ใน draft แรก แก้แล้ว, ระหว่าง deploy พบ route เดิม (`/admin/telemetry`, นอก `/api/`) เปิดไม่ได้จริงเพราะ nginx ไม่ proxy เส้นทางนั้นมา Node — ย้ายมาไว้ใต้ `/api/` แล้ว (ดู §5.7.1)
 
 ---
 

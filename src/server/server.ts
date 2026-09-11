@@ -489,7 +489,14 @@ async function handleTelemetryErrors(req: http.IncomingMessage, res: http.Server
   sendJson(res, 200, { success: true, accepted });
 }
 
-// --- Telemetry dashboard: GET /admin/telemetry (page) + GET /api/admin/telemetry/summary (data) ---
+// --- Telemetry dashboard: GET /api/admin/telemetry/dashboard (page) + /summary (data) ---
+// The page route deliberately lives under /api/ even though it returns HTML, not JSON — nginx
+// (see the deploy's site config) only proxies /ws and /api/ to this Node process; everything
+// else falls through to the built game client's index.html via its SPA catch-all
+// (`try_files $uri $uri/ /index.html`). A route outside /api/ (the original /admin/telemetry)
+// silently served the GAME's login page instead of ever reaching this handler — found live after
+// deploy when the dashboard was unreachable. Reusing the already-proxied prefix avoids needing an
+// nginx config change/reload for what's otherwise a pure application-code fix.
 // Separate secret from JWT_SECRET — this isn't a player account, there's no admin/role concept
 // in the `users` table today (see GAME_WIKI.md's telemetry section), and this data (error stack
 // traces, per-player behavior patterns) shouldn't be reachable by just any registered player.
@@ -581,7 +588,7 @@ const server = http.createServer((req, res) => {
     handleTelemetrySummary(req, res);
     return;
   }
-  if (url.pathname === '/admin/telemetry' && req.method === 'GET') {
+  if (url.pathname === '/api/admin/telemetry/dashboard' && req.method === 'GET') {
     handleTelemetryDashboardPage(req, res);
     return;
   }
