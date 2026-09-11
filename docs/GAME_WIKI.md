@@ -13,6 +13,8 @@
 | 2026-09-11 | พบและแก้ risk ใหม่ #19 (กระสุนบอสถูกวาดใต้ฝูงมอน — client z-order bug) จาก user report ตายไม่รู้สาเหตุที่ลาสบอสด่าน 2 | `docs/archive/2026-09-11-projectile-zorder-fix.md` |
 | 2026-09-11 | Fix B: เปลี่ยน ELITE_GOLEM Ground Slam จาก telegraph-free เป็น 2-phase (warning ring 0.4s ก่อนดาเมจ) — §3.3 table correction | `docs/archive/2026-09-11-projectile-zorder-fix.md` |
 | 2026-09-11 | พบและแก้ risk ใหม่ #20 (IMP hitbox radius 12→16 — visual-vs-hitbox mismatch) จาก user report ธนู archer โดนค้างคาวแต่ไม่มี dmg | `docs/archive/2026-09-11-imp-hitbox-fix.md` |
+| 2026-09-11 | พบและแก้ risk ใหม่ #21 ("Return to Hub" หลังบอสตายค้างเกม — `victoryPending` ไม่เคยตั้ง `isOver`) จาก user report กดกลับสู่เกมหลังจบบอสแล้วเกมค้าง ต้องกดยอมแพ้เพื่อออก | `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md` |
+| 2026-09-11 | Risk audit หลังแก้ #21: เปลี่ยน RETURN_TO_HUB จาก fixed-delay (150ms) เป็น ack-based (`RETURN_TO_HUB_ACK` + fallback timeout 800ms) + พบและแก้ risk ใหม่ #22 (`requireAuth` ไม่เช็คว่า user ยังมีอยู่จริง ทำ `POST /api/progression` พังแบบ unhandled 500 ถ้า token เก่ากว่า DB) | `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md` |
 
 ## สารบัญ
 
@@ -614,6 +616,16 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 - **Shrine system** (SPEED/FRENZY/AEGIS/GOLD_RUSH/ALTAR_BLOOD/ALTAR_TEMPEST/ALTAR_VOID) — บัฟชั่วคราวยืนในโซน (นอก scope เอกสารนี้ แนะนำทำแยกถ้าต้องการรายละเอียดเต็ม)
 - **Prop/obstacle system** — สุ่ม deterministic ด้วย `mulberry32` PRNG ตาม stageId (22 ชิ้น/ด่าน)
 - **Reconnect system** (`RECONNECT_GRACE_MS=60,000`) — หลุดต่อไม่ตายทันที ghost ไว้ 60 วิ
+- **Leave-room-mid-match flows**: `SURRENDER` (solo/คนสุดท้าย → `isOver=true`, coop → `removePlayer`)
+  และ `RETURN_TO_HUB` (เหมือนกันทุกประการแต่ไม่มี gold penalty/ไม่ resend GAME_OVER — ใช้ตอนกด
+  "กลับสู่ล็อบบี้" บนหน้า GAME_OVER ใดก็ได้ รวมโพสต์-victory, ack ผ่าน `RETURN_TO_HUB_ACK` ก่อน client
+  reload มี fallback timeout `RETURN_TO_HUB_ACK_TIMEOUT_MS`=800ms เผื่อ ack หาย) ทั้งคู่มีไว้กัน
+  resume-check ของ `JOIN_LOBBY` (`server.ts:476-490`) ลากผู้เล่นที่ตั้งใจออกกลับเข้าห้องเดิมที่
+  `isStarted && !isOver`
+- **Account/Auth system** (`server.ts`/`auth.ts`/`db.ts`) — JWT (`uid` payload, HS256, TTL 30 วัน),
+  `requireAuth()` ยืนยัน signature + เช็คว่า `uid` ยังมีอยู่จริงใน `users` table ก่อนอนุญาต
+  (`findUserById`) ป้องกัน token เก่ากว่าที่ DB มีจริง (เช่น dev DB ถูกล้าง/สร้างใหม่) ทำให้ query ที่มี
+  `FOREIGN KEY` พัง
 
 ### 5.6 Stability Risk — Game Logic & Mechanics
 
@@ -621,6 +633,8 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 - ⚠️ **Correction (2026-09-11)** — ~~🟡 กลาง — Superconduct chain lightning เรียกตัวเองแบบ recursive: ไม่มี guard กันการ trigger ซ้ำในเฟรมเดียว~~: **Overstate** ตรวจสอบซ้ำพบว่า chain damage เรียก `this.damageMonster(cm, Math.round(amount * 0.6), false)` **ไม่ส่ง** `sourceElement` param — reaction block (`if (element) {...}`) จึงไม่ทำงานกับเป้าหมายที่โดน chain ต่อ ทำให้ chain ไม่ recurse ต่อจริง (guard อยู่แล้วโดยบังเอิญจากการไม่ส่ง element ไม่ใช่ recursion bug จริง) (`src/server/engine/GameRoom.ts`)
 - 🟡 **กลาง — Armor formula ไม่มี cap บนขีดสุด**: ไม่มี "effective HP cap" ที่ตั้งใจออกแบบไว้ชัดเจน (แม้ actualDamage floor ที่ 1 จะกันสุดทางไว้อยู่)
 - 🟢 **ต่ำ — Elemental reaction logic ยาวเป็น if/else chain เดียว**: เพิ่มปฏิกิริยาใหม่เสี่ยง order-of-check ผิด
+- ✅ **พบและแก้แล้ว (2026-09-11)** — 🔴 **สูง — "Return to Hub" หลังบอสตายทำเกมค้าง (`victoryPending` ไม่เคยตั้ง `isOver`)**: บอส Lord of Torment ตาย (`GameRoom.ts:2645-2652`) ตั้ง `victoryPending=true` freeze โลกรอผู้เล่นเลือก Continue แต่ไม่เคยตั้ง `isOver=true` — client เดิมกดปุ่ม "กลับสู่ล็อบบี้" (`HUD.ts:249-251`) แค่ `window.location.reload()` ไม่แจ้ง server เลย พอ reload ต่อ socket ใหม่ ส่ง `JOIN_LOBBY` resume-check (`server.ts:476-490`) เห็นห้องยัง `isStarted && !isOver` จึงลากกลับเข้าห้องเดิมที่ยัง freeze อยู่แทนที่จะไป lobby → หน้าจอค้างเหมือน pause ไม่มีเมนู ต้องกดยอมแพ้เพื่อออก เกิดเหมือนกันทั้ง solo/coop (ไม่ใช่ solo-only ตามที่ user เจอครั้งแรก) — comment ใน `handleSurrender()` (`GameRoom.ts:438-441`) อธิบาย bug class นี้ไว้ตรงๆ อยู่แล้วและเคยแก้ให้ปุ่มยอมแพ้แล้ว แต่ไม่เคยพอร์ตมาใช้กับ flow ชนะบอส แก้โดยเพิ่ม `handleReturnToHub()` (คู่ขนานกับ `handleSurrender` แต่ไม่มี gold penalty/ไม่ resend GAME_OVER) + message ใหม่ `RETURN_TO_HUB` + ack round-trip (`RETURN_TO_HUB_ACK`, fallback timeout 800ms) ก่อน client reload (`src/shared/types.ts`, `src/shared/constants.ts`, `src/server/engine/GameRoom.ts`, `src/server/server.ts`, `src/client/ui/HUD.ts`, `src/client/main.ts`, test: `GameRoom.test.ts`, spec: `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md`) — พบจาก user report "กดกลับสู่เกมหลังจบบอสแล้วเกมค้าง ต้องกดยอมแพ้เพื่อออก"
+- ✅ **พบและแก้แล้ว (2026-09-11)** — 🟡 **กลาง — `requireAuth()` ไม่เช็คว่า user ยังมีอยู่จริง ทำ `POST /api/progression` พังแบบ unhandled 500**: `requireAuth()` (`server.ts:222-231`) เดิมเช็คแค่ JWT signature ถูกต้อง (`verifyToken()`) ไม่เคยเช็คว่า `uid` ที่ decode ได้ยังมีแถวอยู่จริงใน `users` table — TOKEN_TTL 30 วันทำให้ token ที่ออกไว้ก่อนหน้า (เช่น dev DB ถูกล้าง/สร้างใหม่, หรือ account ถูกลบ) ยัง verify ผ่านอยู่ `GET /api/progression` ไม่พังเพราะ `SELECT` กับ id ที่ไม่มีอยู่แค่คืนค่าเปล่า แต่ `POST`'s `INSERT INTO progression` มี `FOREIGN KEY REFERENCES users(id)` เลย throw `SqliteError` ไม่มีใคร catch จนกลายเป็น 500 พบระหว่างทดสอบสด fix ด้านบน (ไม่เกี่ยวข้องกันเลย คนละ root cause) แก้โดยเพิ่ม `findUserById(payload.uid)` ใน `requireAuth()` ถ้าไม่พบให้ตอบ 401 เหมือนกรณี token ขาด/ผิด (`src/server/server.ts`, spec: `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md`) — ไม่มี unit test เพิ่ม เพราะ `server.ts` ทั้งไฟล์ไม่มี test harness ในโปรเจกต์นี้ (import จะเริ่ม HTTP+WS listener จริงทันที) ยืนยันด้วย manual E2E แทน (500 → 401 ทั้ง server log และ network tab)
 
 ---
 
@@ -632,6 +646,8 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 2. ~~`triggerLevelUpChoices()` อาจส่งการ์ดว่างเปล่าไม่มี fallback~~ (§4.7) — **✅ แก้แล้ว 2026-09-11**
 3. **TICK message ส่ง full state ทุก 40ms ไม่มี delta compression** (§5.6) — payload โตตามจำนวนมอน/ผู้เล่น/เวฟ เป็นความเสี่ยง scaling ระยะยาว — **ยังไม่แก้** (scope ใหญ่)
 19. ~~กระสุนถูกวาดใต้ฝูงมอนสเตอร์ (client z-order bug)~~ (§3.7) — **✅ แก้แล้ว 2026-09-11** (พบใหม่นอก 18 ข้อเดิม — user report "ตายไม่รู้สาเหตุตอนลาสบอสด่าน 2")
+21. ~~"Return to Hub" หลังบอสตายทำเกมค้าง (`victoryPending` ไม่เคยตั้ง `isOver`)~~ (§5.6) — **✅ แก้แล้ว 2026-09-11** (พบใหม่นอก 20 ข้อเดิม — user report "กดกลับสู่เกมหลังจบบอสแล้วเกมค้าง ต้องกดยอมแพ้เพื่อออก")
+22. ~~`requireAuth()` ไม่เช็คว่า user ยังมีอยู่จริง — `POST /api/progression` พังแบบ unhandled 500 ถ้า token เก่ากว่า DB~~ (§5.6) — **✅ แก้แล้ว 2026-09-11** (พบใหม่นอก 21 ข้อเดิม ระหว่าง manual test ของ #21 — คนละ root cause กัน)
 
 ### 🟡 กลาง — ควรแก้รอบถัดไป
 
@@ -658,4 +674,4 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 ---
 
 *เอกสารนี้สร้างจากการวิเคราะห์ source code จริง ณ วันที่ 2026-09-11 — หากโค้ดมีการเปลี่ยนแปลงหลังจากนี้ ควรตรวจสอบซ้ำก่อนใช้อ้างอิง*
-*อัปเดตล่าสุด: 2026-09-11 (Round 1 functional bugfix) — ดูรายละเอียดที่ `docs/archive/2026-09-11-round1-functional-bugfixes.md`*
+*อัปเดตล่าสุด: 2026-09-11 ("Return to Hub" post-boss-victory trap fix) — ดูรายละเอียดที่ `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md`*

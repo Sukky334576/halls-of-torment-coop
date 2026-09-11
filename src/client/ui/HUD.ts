@@ -31,6 +31,7 @@ export class HUD {
   public onDash: (() => void) | null = null;
   public onEscMenu: (() => void) | null = null;
   public onContinueRun: (() => void) | null = null;
+  public onReturnToHub: (() => void) | null = null;
 
   constructor(container: HTMLElement, sound?: SoundManager) {
     this.container = container;
@@ -247,7 +248,7 @@ export class HUD {
     });
 
     document.getElementById('btn-retry')?.addEventListener('click', () => {
-      window.location.reload();
+      this.onReturnToHub?.();
     });
 
     document.getElementById('btn-continue-run')?.addEventListener('click', () => {

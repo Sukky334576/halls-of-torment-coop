@@ -24,6 +24,12 @@ export const GAME_CONSTANTS = {
   // or timing out — those still pay out 100% of collected gold. Keep this in sync with the
   // "รางวัลได้แค่ xx%" framing if the percentage ever changes.
   SURRENDER_GOLD_RETENTION: 0.5, // keep 50% of personally-collected gold on surrender
+  // "Return to Hub" sends RETURN_TO_HUB then waits for the server's RETURN_TO_HUB_ACK before
+  // reloading, so the room is actually released before the reload tears the connection down
+  // (otherwise the reconnecting client could get trapped back into it). This timeout is only
+  // the no-ack fallback — dropped message, server hiccup, etc. — so the reload always happens
+  // even in that case, just without the guarantee.
+  RETURN_TO_HUB_ACK_TIMEOUT_MS: 800,
 
   // EXP requirements (nerfed progression by ~30%)
   EXP_BASE: 20,

@@ -386,6 +386,7 @@ export type ClientMessage =
   | { type: 'USE_POTION'; action: 'REROLL' | 'BANISH' | 'LOCK'; traitId?: string }
   | { type: 'SEND_WELL_GEAR'; gearId: string }
   | { type: 'SURRENDER' }
+  | { type: 'RETURN_TO_HUB' }
   | { type: 'CONTINUE_RUN' }
   | { type: 'PAUSE_GAME'; isPaused: boolean }
   | { type: 'CREATE_ROOM'; roomName?: string; password?: string }
@@ -450,4 +451,7 @@ export type ServerMessage =
   | { type: 'WELL_GEAR_RETRIEVED'; gearId: string; gearName: string; retrievedBy: string }
   | { type: 'ROOM_LIST'; rooms: RoomSummary[] }
   | { type: 'GRANT_GOLD'; amount: number; message: string; thaiMessage: string; grantId?: string }
-  | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number; reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER'; canContinue?: boolean };
+  | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number; reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER'; canContinue?: boolean }
+  // Confirms the server actually processed RETURN_TO_HUB (room released) before the client
+  // reloads — see GAME_CONSTANTS.RETURN_TO_HUB_ACK_TIMEOUT_MS for the no-ack fallback.
+  | { type: 'RETURN_TO_HUB_ACK' };

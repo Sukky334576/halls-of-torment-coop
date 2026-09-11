@@ -7,7 +7,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import serveStatic from 'serve-static';
 import { ClientMessage, ServerMessage, PlayerClass, RoomSummary } from '../shared/types';
 import { GameRoom } from './engine/GameRoom';
-import { createUser, findUserByUsername, getProgression, setProgression } from './db';
+import { createUser, findUserByUsername, findUserById, getProgression, setProgression } from './db';
 import { hashPassword, verifyPassword, signToken, verifyToken, isRateLimited, USERNAME_RE, MIN_PASSWORD_LENGTH } from './auth';
 
 interface ConnectedClient {
@@ -218,12 +218,19 @@ function getClientIp(req: http.IncomingMessage): string {
 }
 
 /** Reads the Bearer token from the Authorization header. Returns the authenticated user id,
- * or null (and already wrote a 401 response) if the token is missing/invalid. */
+ * or null (and already wrote a 401 response) if the token is missing/invalid/stale.
+ *
+ * A signature-valid JWT alone isn't enough — TOKEN_TTL is 30 days, so a token issued against a
+ * `users` row that no longer exists (dev DB reset/recreated, or an account otherwise removed)
+ * still verifies fine. GET /api/progression masked this (a SELECT on a nonexistent user_id just
+ * returns no rows), but POST /api/progression's INSERT has a FOREIGN KEY REFERENCES users(id)
+ * and crashed with an unhandled 500 instead of a clean, already-client-handled 401. Checking the
+ * user still exists turns that crash into the same "please log in again" case as a missing token. */
 function requireAuth(req: http.IncomingMessage, res: http.ServerResponse): number | null {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   const payload = token ? verifyToken(token) : null;
-  if (!payload) {
+  if (!payload || !findUserById(payload.uid)) {
     sendJson(res, 401, { success: false, error: 'Missing or invalid auth token' });
     return null;
   }
@@ -656,6 +663,17 @@ wss.on('connection', (ws: WebSocket) => {
           if (entry && entry.room.isStarted) {
             entry.room.handleSurrender(client.deviceId);
           }
+          break;
+        }
+
+        case 'RETURN_TO_HUB': {
+          const entry = getClientRoom(client);
+          if (entry && entry.room.isStarted) {
+            entry.room.handleReturnToHub(client.deviceId);
+          }
+          // Ack unconditionally (even with no room / already-over) so the client's reload isn't
+          // left waiting on its no-ack fallback timeout for a case that needed no server work.
+          sendToClient(client.id, { type: 'RETURN_TO_HUB_ACK' });
           break;
         }
 

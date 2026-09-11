@@ -416,3 +416,50 @@ describe('GameRoom Ground Slam telegraph (Elite Golem, docs/archive/2026-09-11-p
     expect(player.stats.hp).toBe(player.stats.maxHp); // dodged successfully
   });
 });
+
+describe('GameRoom.handleReturnToHub (post-boss-victory "Return to Hub" trap fix)', () => {
+  it('solo: marks the room isOver so the JOIN_LOBBY resume-check releases the player instead of re-trapping them', () => {
+    const { room } = makeRoom();
+    addTestPlayer(room, 'p1');
+    (room as any).victoryPending = true; // boss just died, party hasn't picked Continue yet
+
+    room.handleReturnToHub('p1');
+
+    expect(room.isOver).toBe(true);
+  });
+
+  it('co-op: removes only the leaving player, leaves the room open (not isOver) for the teammate still deciding', () => {
+    const { room } = makeRoom();
+    addTestPlayer(room, 'p1');
+    addTestPlayer(room, 'p2');
+    (room as any).victoryPending = true;
+
+    room.handleReturnToHub('p1');
+
+    expect(room.isOver).toBe(false);
+    expect((room as any).players.has('p1')).toBe(false);
+    expect((room as any).players.has('p2')).toBe(true);
+  });
+
+  it('does not resend GAME_OVER or touch gold — the player already banked their win before clicking Return', () => {
+    const { room, sent } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.gold = 250;
+    (room as any).victoryPending = true;
+    sent.length = 0; // ignore whatever the boss-death GAME_OVER already queued before this test's assertions
+
+    room.handleReturnToHub('p1');
+
+    expect(sent.some((s) => s.msg.type === 'GAME_OVER')).toBe(false);
+    expect(player.gold).toBe(250); // unlike Surrender's SURRENDER_GOLD_RETENTION penalty
+  });
+
+  it('regression: a no-op once the room is already isOver (normal, already-working defeat/continue flow)', () => {
+    const { room } = makeRoom();
+    addTestPlayer(room, 'p1');
+    (room as any).isOver = true;
+
+    expect(() => room.handleReturnToHub('p1')).not.toThrow();
+    expect((room as any).players.has('p1')).toBe(true); // untouched — nothing to release
+  });
+});

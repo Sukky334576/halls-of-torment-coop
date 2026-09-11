@@ -456,6 +456,24 @@ export class GameRoom {
     }
   }
 
+  /** Player clicked "Return to Hub" on a GAME_OVER screen — most commonly the post-boss-
+   * victory one (canContinue=true), which leaves the room `victoryPending`-frozen forever
+   * instead of over. They already received their real GAME_OVER (win or loss) when the match
+   * actually ended, so — unlike handleSurrender above — this isn't a loss: no gold penalty,
+   * no GAME_OVER resend, just the same room-release the co-op Surrender branch already needed
+   * (see its comment) so the client's reload-triggered JOIN_LOBBY resume-check doesn't trap
+   * them back into this same still-"in progress" room instead of the lobby. */
+  public handleReturnToHub(playerId: string): void {
+    const player = this.players.get(playerId);
+    if (!player || this.isOver) return;
+
+    if (this.players.size <= 1) {
+      this.isOver = true;
+    } else {
+      this.removePlayer(playerId);
+    }
+  }
+
   private tick(): void {
     if (!this.isStarted || this.isOver) return;
 

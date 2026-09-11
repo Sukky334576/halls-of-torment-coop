@@ -16,6 +16,7 @@ import { AuthClient } from './engine/AuthClient';
 import { AuthGateUI } from './ui/AuthGateUI';
 import { MainMenuUI, GameMode } from './ui/MainMenuUI';
 import { RoomBrowserUI } from './ui/RoomBrowserUI';
+import { GAME_CONSTANTS } from '../shared/constants';
 
 const DEVICE_ID_KEY = 'torment_device_id';
 
@@ -79,6 +80,11 @@ class GameApp {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly MAX_RECONNECT_ATTEMPTS = 20;
+
+  // Set while waiting on RETURN_TO_HUB_ACK (see onReturnToHub below) — called either by the
+  // ack itself or the no-ack fallback timeout, whichever fires first. Cleared once run so the
+  // other one can't also fire it a second time.
+  private pendingReturnToHub: (() => void) | null = null;
 
   // Input states
   private keys: Record<string, boolean> = {};
@@ -147,6 +153,17 @@ class GameApp {
     this.hud.onContinueRun = () => {
       this.send({ type: 'CONTINUE_RUN' });
       this.hud.hideGameOver();
+    };
+    this.hud.onReturnToHub = () => {
+      // Reload once, whichever fires first: the server's RETURN_TO_HUB_ACK (the room is
+      // confirmed released) or the fallback timeout (message/ack lost — reload anyway rather
+      // than leave the player stuck on a dead click).
+      this.pendingReturnToHub = () => {
+        this.pendingReturnToHub = null;
+        window.location.reload();
+      };
+      this.send({ type: 'RETURN_TO_HUB' });
+      setTimeout(() => this.pendingReturnToHub?.(), GAME_CONSTANTS.RETURN_TO_HUB_ACK_TIMEOUT_MS);
     };
 
     this.escMenu = new EscMenuUI(escContainer, this.sound);
@@ -591,6 +608,11 @@ class GameApp {
                 this.hud.addFloatingMessage(me.x, me.y - 45, `🎁 +${msg.amount.toLocaleString()} SOUL COINS!`, '#facc15');
               }
             }
+            break;
+          }
+
+          case 'RETURN_TO_HUB_ACK': {
+            this.pendingReturnToHub?.();
             break;
           }
 
