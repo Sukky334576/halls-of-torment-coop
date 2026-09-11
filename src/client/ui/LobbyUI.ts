@@ -1582,7 +1582,7 @@ export class LobbyUI {
         const lockText = id === 2 ? I18n.t('stage.2.lock') : id === 3 ? I18n.t('stage.3.lock') : '';
         const stageName = isTh ? stage.thaiName : stage.name;
         const stageSub = isTh ? stage.name : stage.thaiName;
-        const stageDesc = isTh ? I18n.t(`stage.${id}.desc`) : stage.description;
+        const stageDesc = isTh ? stage.description : I18n.t(`stage.${id}.desc`);
         const stageDiff = isTh ? I18n.t(`stage.${id}.diff`) : stage.difficultyLabel;
 
         return `
