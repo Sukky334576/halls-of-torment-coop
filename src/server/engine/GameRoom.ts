@@ -22,6 +22,10 @@ import { SpatialGrid } from './SpatialGrid';
 import { HordeDirector } from './HordeDirector';
 import { STAGES, generateStageProps } from '../../shared/stages';
 import { GearItem, GearRarity, getGearItem, getRandomGearOfRarity } from '../../shared/gearData';
+import { randomUUID } from 'crypto';
+import type { DeathCause } from '../../shared/telemetryTypes';
+import { logGameEvent, logError } from '../telemetry/TelemetryBuffer';
+import { SERVER_BUILD_VERSION } from '../telemetry/buildVersion';
 
 // Comfortably larger than maxHp is reachable by any build — used only by the final-boss
 // execute deadline (see HordeDirector.isDeadlineExpired) to guarantee death via
@@ -43,6 +47,13 @@ interface Projectile {
   pierceRemaining: number;
   hitEntityIds: Set<number>;
   isLightning?: boolean;
+  // Enemy projectiles only — which monster type fired this, for death-cause telemetry. Set at
+  // every enemy projectile push site (the generic ranged-AI shot and each boss ability).
+  sourceMonsterType?: MonsterType;
+  // Set only for a boss's own named-ability projectile (e.g. 'boulder_toss'); left undefined
+  // for a generic ranged monster's shot, which is how the death-cause hit resolution below
+  // tells "boss_ability" apart from a plain "projectile" death.
+  sourceAbilityId?: string;
 }
 
 interface Pickup {
@@ -72,7 +83,13 @@ export class GameRoom {
 
   private monsters: Map<number, ServerMonster> = new Map();
   private monsterGrid: SpatialGrid<ServerMonster> = new SpatialGrid<ServerMonster>(GAME_CONSTANTS.SPATIAL_CELL_SIZE);
-  private hordeDirector: HordeDirector = new HordeDirector();
+  // Instantiated in the constructor body (not inline here) so the onWaveChange callback can
+  // close over `this` for wave_reached telemetry — field initializers run before the
+  // constructor body even sees `this` assigned to anything meaningful.
+  private hordeDirector: HordeDirector;
+  // Generated fresh in start() — a room can exist (lobby, not-yet-started) before it ever runs
+  // a match, so this can't be set at construction time either.
+  private runId: string = '';
   private stageId: number = 1;
   private props: PropInstance[] = [];
 
@@ -110,6 +127,46 @@ export class GameRoom {
     this.sendCallback = sendCallback;
     this.onEmpty = onEmpty;
     this.broadcastCallback = broadcastCallback;
+    this.hordeDirector = new HordeDirector(1, (wave) => this.logGameEvent('wave_reached', {}, { wave }));
+  }
+
+  /** Shared shape for every game_events row this room logs — see docs/GAME_WIKI.md's telemetry
+   * section for the full event_type/payload catalogue. Room-level events (run_start,
+   * wave_reached, boss_kill, run_end) simply omit playerId/playerClass. */
+  private logGameEvent(
+    eventType: 'run_start' | 'level_up_choice' | 'death' | 'wave_reached' | 'boss_kill' | 'run_end',
+    payload: Record<string, unknown>,
+    opts?: { playerId?: string; playerClass?: PlayerClass; wave?: number }
+  ): void {
+    logGameEvent({
+      runId: this.runId,
+      playerId: opts?.playerId,
+      playerClass: opts?.playerClass,
+      stageId: this.stageId,
+      partySize: this.players.size,
+      buildVersion: SERVER_BUILD_VERSION,
+      eventType,
+      wave: opts?.wave ?? this.hordeDirector.getCurrentWave(),
+      elapsedMs: Math.round(this.hordeDirector.getElapsedTime() * 1000),
+      payload
+    });
+  }
+
+  /** Call right after any ServerPlayer.takeDamage()/applyTrueDamage() call returns true — reads
+   * the cause/fatalHitDamage/wasOneShot that method just stashed on the player and fills in the
+   * one thing only GameRoom knows: how many teammates are still standing. */
+  private logDeathEvent(player: ServerPlayer): void {
+    const info = player.lastDeathCause;
+    if (!info) return; // Defensive only — every takeDamage/applyTrueDamage call site below passes a source.
+    let survivorCount = 0;
+    for (const p of this.players.values()) {
+      if (!p.isDead) survivorCount++;
+    }
+    this.logGameEvent(
+      'death',
+      { cause: info.cause, fatalHitDamage: info.fatalHitDamage, wasOneShot: info.wasOneShot, survivorCount },
+      { playerId: player.id, playerClass: player.playerClass }
+    );
   }
 
   public addPlayer(
@@ -220,8 +277,10 @@ export class GameRoom {
 
   public start(stageId: number = 1): void {
     this.stageId = stageId;
+    this.runId = randomUUID();
     this.hordeDirector.setStage(stageId);
     this.isStarted = true;
+    this.logGameEvent('run_start', {});
     // Was a 35,000 testing-phase starting gift — teamGold gets converted 1:1 into every
     // player's real, permanent coins at GAME_OVER (see broadcastGameOver's personalGold +
     // teamGold/playerCount split), so this silently handed out 35k free gold on every single
@@ -292,6 +351,17 @@ export class GameRoom {
     if (trait.targetClass && trait.targetClass !== player.playerClass) return;
     if (trait.isSignature && !player.unlockedSkills.has(trait.id)) return;
     if (this.getSkillRank(trait.id, player.skills) >= 3) return;
+
+    this.logGameEvent(
+      'level_up_choice',
+      {
+        offered: Array.from(player.currentTraitChoiceIds),
+        picked: traitId,
+        rarity: trait.rarity,
+        currentRank: this.getSkillRank(trait.id, player.skills)
+      },
+      { playerId: player.id, playerClass: player.playerClass }
+    );
 
     trait.apply(player.stats, player.skills);
     player.acquiredTraits.push(traitId);
@@ -419,6 +489,62 @@ export class GameRoom {
     }
   }
 
+  /** Catches a player's x/y/hp going non-finite (NaN/Infinity) or hp dropping below 0 — both
+   * have happened before from a division-by-zero-shaped bug elsewhere (see ServerMonster's own
+   * dist===0 guard, docs/GAME_WIKI.md §3.7 risk #11) and, left unnoticed, cascade into every
+   * later distance/collision calc against this player for the rest of the match. Reports once
+   * (then dedupes via error_log's signature hash on every repeat) and clamps back to a safe
+   * value so a single corrupted frame doesn't propagate. See checkMonsterSanity() below for the
+   * monster-side counterpart — together these cover every GridEntity this room simulates, without
+   * reaching for a general "wrap everything in try/catch" pass that has no known throwing code
+   * path to justify it. */
+  private checkPlayerSanity(player: ServerPlayer): void {
+    const badPosition = !Number.isFinite(player.x) || !Number.isFinite(player.y);
+    const badHp = !Number.isFinite(player.stats.hp) || player.stats.hp < 0;
+    if (!badPosition && !badHp) return;
+
+    logError({
+      source: 'server',
+      category: 'logic_anomaly',
+      message: `player state anomaly: x=${player.x} y=${player.y} hp=${player.stats.hp}`,
+      context: { runId: this.runId, playerId: player.id },
+      buildVersion: SERVER_BUILD_VERSION
+    });
+    if (badPosition) {
+      player.x = 0;
+      player.y = 0;
+    }
+    if (badHp) {
+      player.stats.hp = 0;
+    }
+  }
+
+  /** Monster-side counterpart to checkPlayerSanity() above — same corruption shape (non-finite
+   * x/y/hp), same clamp-and-report treatment. `ServerMonster.update()` already guards its own
+   * historically-real division-by-zero case (dist===0, risk #11), so this is a second, cheap
+   * backstop for any other path that might someday drive a monster's state non-finite — not
+   * a sign a live bug is suspected here today. */
+  private checkMonsterSanity(monster: ServerMonster): void {
+    const badPosition = !Number.isFinite(monster.x) || !Number.isFinite(monster.y);
+    const badHp = !Number.isFinite(monster.hp) || monster.hp < 0;
+    if (!badPosition && !badHp) return;
+
+    logError({
+      source: 'server',
+      category: 'logic_anomaly',
+      message: `monster state anomaly: type=${monster.type} x=${monster.x} y=${monster.y} hp=${monster.hp}`,
+      context: { runId: this.runId, monsterId: monster.id },
+      buildVersion: SERVER_BUILD_VERSION
+    });
+    if (badPosition) {
+      monster.x = 0;
+      monster.y = 0;
+    }
+    if (badHp) {
+      monster.hp = 0;
+    }
+  }
+
   public handleSurrender(playerId: string): void {
     const player = this.players.get(playerId);
     if (!player || this.isOver) return;
@@ -442,6 +568,7 @@ export class GameRoom {
       // 'SURRENDER' only tags THIS message — the fallback broadcast below (for teammates who
       // died naturally, not by choice, if this happened to be the last one standing) must not
       // carry it.
+      this.logRunEndFor(player, 'surrender');
       this.sendGameOverTo(player, false, undefined, 'SURRENDER');
       this.removePlayer(playerId);
 
@@ -517,6 +644,7 @@ export class GameRoom {
         alivePlayers.push(player);
         player.update(dt);
         this.resolvePropCollision(player, player.radius);
+        this.checkPlayerSanity(player);
 
         // Process Player Attack
         if (player.canAttack()) {
@@ -593,7 +721,9 @@ export class GameRoom {
     if (this.hordeDirector.isDeadlineExpired() && !this.isOver) {
       for (const player of this.players.values()) {
         if (player.isDead || player.isDisconnected) continue;
-        player.applyTrueDamage(EXECUTE_DAMAGE_AMOUNT);
+        if (player.applyTrueDamage(EXECUTE_DAMAGE_AMOUNT, { sourceType: 'execute_deadline' })) {
+          this.logDeathEvent(player);
+        }
       }
       this.isOver = true;
       this.broadcastGameOver(false, this.stageId, 'BOSS_ENRAGE_EXECUTE');
@@ -664,6 +794,7 @@ export class GameRoom {
       monster.x = Math.max(-mapLimit, Math.min(mapLimit, monster.x));
       monster.y = Math.max(-mapLimit, Math.min(mapLimit, monster.y));
       this.resolvePropCollision(monster, monster.radius);
+      this.checkMonsterSanity(monster);
       this.monsterGrid.insert(monster);
 
       if (monster.isBoss) {
@@ -697,7 +828,8 @@ export class GameRoom {
           radius: projRadius,
           lifeTime: 1.8,
           pierceRemaining: 1,
-          hitEntityIds: new Set()
+          hitEntityIds: new Set(),
+          sourceMonsterType: monster.type
         });
       }
 
@@ -705,7 +837,10 @@ export class GameRoom {
       if (nearestDist < monster.radius + 20) {
         const player = alivePlayers.find((p) => Math.hypot(p.x - monster.x, p.y - monster.y) === nearestDist);
         if (player) {
-          player.takeDamage(monster.damage * dt * 2); // Contact damage tick
+          // Contact damage tick
+          if (player.takeDamage(monster.damage * dt * 2, { sourceType: 'monster_contact', monsterType: monster.type })) {
+            this.logDeathEvent(player);
+          }
           if (player.skills?.ironRetaliation) {
             this.damageMonster(monster, Math.max(2, Math.round(player.stats.flatDamage * 0.35)), false);
           }
@@ -2018,7 +2153,12 @@ export class GameRoom {
           if (!player.isDead) {
             const dist = Math.hypot(player.x - p.x, player.y - p.y);
             if (dist <= player.radius + p.radius) {
-              const damaged = player.takeDamage(p.damage);
+              const damaged = player.takeDamage(p.damage, {
+                sourceType: p.sourceAbilityId ? 'boss_ability' : 'projectile',
+                monsterType: p.sourceMonsterType,
+                abilityId: p.sourceAbilityId
+              });
+              if (damaged) this.logDeathEvent(player);
               this.broadcastDamageNumber(player.x, player.y - 15, p.damage, false);
               p.pierceRemaining = 0;
               p.lifeTime = 0;
@@ -2255,7 +2395,9 @@ export class GameRoom {
           // actually escapes it, instead of the hit just following them.
           for (const p of alivePlayers) {
             if (Math.hypot(p.x - monster.slamTelegraphX, p.y - monster.slamTelegraphY) <= SLAM_RADIUS) {
-              p.takeDamage(monster.damage * 2.5);
+              if (p.takeDamage(monster.damage * 2.5, { sourceType: 'boss_ability', monsterType: monster.type, abilityId: 'ground_slam' })) {
+                this.logDeathEvent(p);
+              }
             }
           }
           // Reuses the Cat Tank ultimate's shockwave visual — same "stone/earth impact" read.
@@ -2334,7 +2476,9 @@ export class GameRoom {
             radius: 12,
             lifeTime: 2.5,
             pierceRemaining: 1,
-            hitEntityIds: new Set()
+            hitEntityIds: new Set(),
+            sourceMonsterType: MonsterType.ELITE_GOLEM,
+            sourceAbilityId: 'boulder_toss'
           });
         }
       }
@@ -2370,7 +2514,9 @@ export class GameRoom {
             radius: 8,
             lifeTime: 2.2,
             pierceRemaining: 1,
-            hitEntityIds: new Set()
+            hitEntityIds: new Set(),
+            sourceMonsterType: MonsterType.LORD_OF_TORMENT,
+            sourceAbilityId: 'void_barrage'
           });
         }
         this.broadcastDamageNumber(monster.x, monster.y - 30, 0, false, '🌑 VOID BARRAGE!', '#a855f7');
@@ -2430,7 +2576,9 @@ export class GameRoom {
           radius: 10,
           lifeTime: 2.0,
           pierceRemaining: 1,
-          hitEntityIds: new Set()
+          hitEntityIds: new Set(),
+          sourceMonsterType: MonsterType.HELLHOUND,
+          sourceAbilityId: 'hellfire_spit'
         });
       }
     }
@@ -2617,6 +2765,17 @@ export class GameRoom {
 
       // Boss Defeat Rewards: drops 3 gold coins scaled by stage + Tome of Greater Ascension
       if (monster.isBoss) {
+        let playersAliveAtKill = 0;
+        for (const p of this.players.values()) {
+          if (!p.isDead) playersAliveAtKill++;
+        }
+        this.logGameEvent('boss_kill', {
+          bossType: monster.type,
+          bossName: monster.bossName,
+          timeSinceSpawnMs: Date.now() - monster.spawnedAt,
+          playersAliveAtKill
+        });
+
         if (monster.bossName !== 'Elite Void Guardian') {
           this.hordeDirector.onBossDefeated();
         }
@@ -3349,7 +3508,42 @@ export class GameRoom {
     });
   }
 
+  // The one choke point every real match-ending path (wipe, surrender-as-last-player, the
+  // wave-30 boss-enrage execute, and boss victory) funnels through — see handleSurrender/tick's
+  // wipe check/damageMonster's LORD_OF_TORMENT branch — so it's also the natural place run_end
+  // telemetry logs for whoever's still in the room when it actually ends. One row per player
+  // (each with their own finalLevel/finalGold) rather than one row for the whole room, since
+  // those numbers genuinely differ per player and that's exactly the kind of thing "average
+  // time-to-wave" style analysis needs per-player, not team-aggregated.
+  //
+  // A co-op player who surrenders while teammates keep playing does NOT go through this method
+  // at all (handleSurrender's non-solo branch sends its own GAME_OVER via sendGameOverTo()
+  // directly, since the room itself isn't ending) — that branch calls logRunEndFor() itself
+  // instead, so their run_end still gets recorded even though the room's run_id lives on.
+  /** Shared with the co-op-surrender-while-teammates-continue branch below (handleSurrender) —
+   * that path sends its own GAME_OVER via sendGameOverTo() directly rather than through
+   * broadcastGameOver(), so it needs this same run_end logging called explicitly too instead of
+   * inheriting it for free. */
+  private logRunEndFor(player: ServerPlayer, outcome: string): void {
+    this.logGameEvent(
+      'run_end',
+      {
+        outcome,
+        finalLevel: player.stats.level,
+        finalGold: player.gold,
+        playtimeMs: Math.round(this.hordeDirector.getElapsedTime() * 1000)
+      },
+      { playerId: player.id, playerClass: player.playerClass }
+    );
+  }
+
   private broadcastGameOver(victory: boolean, clearedStageId?: number, reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER', canContinue?: boolean): void {
+    const outcome =
+      reason === 'SURRENDER' ? 'surrender' : reason === 'BOSS_ENRAGE_EXECUTE' ? 'boss_enrage_execute' : victory ? 'victory' : 'wipe';
+    for (const player of this.players.values()) {
+      this.logRunEndFor(player, outcome);
+    }
+
     for (const player of this.players.values()) {
       this.sendGameOverTo(player, victory, clearedStageId, reason, canContinue);
     }

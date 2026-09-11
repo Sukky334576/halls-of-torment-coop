@@ -15,6 +15,8 @@
 | 2026-09-11 | พบและแก้ risk ใหม่ #20 (IMP hitbox radius 12→16) เพิ่มใน Refactor Roadmap Phase 1 | `docs/archive/2026-09-11-imp-hitbox-fix.md` |
 | 2026-09-11 | พบและแก้ risk ใหม่ #21 ("Return to Hub" หลังบอสตายทำเกมค้าง) เพิ่มใน Refactor Roadmap Phase 1 | `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md` |
 | 2026-09-11 | Risk audit หลังแก้ #21: เปลี่ยนเป็น ack-based + พบและแก้ risk ใหม่ #22 (`requireAuth` ไม่เช็ค user ยังมีอยู่จริง) เพิ่มใน Refactor Roadmap Phase 1 | `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md` |
+| 2026-09-11 | เพิ่มระบบ Telemetry & Error Logging ใหม่ทั้งระบบ — เพิ่ม Flow 4 (B.2), telemetry ER entities (B.4), Refactor Roadmap Phase 3 items ใหม่ #23-25 (B.5), Known Design Decisions 2 ข้อใหม่เรื่อง no-auth endpoint + crash-then-exit (B.6) | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-11 | Risk audit หลังพัฒนา telemetry (user ขอ "ลดความเสี่ยงให้ต่ำที่สุด"): #23 no-auth endpoint ลดความเสี่ยงด้วย rate limit, เพิ่ม `run_end` ให้ co-op surrender, เพิ่ม `checkMonsterSanity()` — renumber Roadmap #23-24 เดิม (retention/dashboard) เป็น #24-25 ให้ตรงกับ GAME_WIKI.md (เจอ numbering ไม่ตรงกันระหว่าง 2 เอกสารตอน sync รอบนี้ แก้ให้ตรงแล้ว) | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 >
 > สร้างเมื่อ 2026-09-11
 
@@ -136,6 +138,24 @@ flowchart LR
     L -->|WELL_GEAR| N["ส่งไป client<br/>MetaProgression.addGearToVault()<br/>→ localStorage vaultInventory"]
 ```
 
+### Flow 4 — Telemetry Capture (server + client) → Buffer → Batched Flush → telemetry.db
+
+```mermaid
+flowchart LR
+    A1["level_up_choice / death / wave_reached /<br/>boss_kill / run_start / run_end<br/>(GameRoom.ts hook points)"] -->|"logGameEvent()"| B["TelemetryBuffer<br/>pendingEvents[] / pendingErrors Map<br/>(memory only, no DB I/O here)"]
+    A2["window.onerror / onunhandledrejection /<br/>render loop try/catch / ws.onclose/onopen<br/>(ClientTelemetry.ts)"] -->|"batch POST every 3s"| C["POST /api/telemetry/errors<br/>(unauthenticated, capped ≤50/request)"]
+    C -->|"logError()"| B
+    D["process.on('uncaughtException'/<br/>'unhandledRejection')<br/>(server.ts)"] -->|"logError() then shutdownTelemetry()<br/>then process.exit(1)"| B
+    B -->|"setInterval flush, 1s<br/>db.transaction() batch"| E[("telemetry.db<br/>game_events + error_log<br/>WAL mode, separate from game.db")]
+
+    style B fill:#7c2d12,color:#fff
+    style E fill:#3f3f46,color:#fff
+```
+
+**หมายเหตุ**: `POST /api/telemetry/events` (คู่กับ `/errors`) มีอยู่จริงและทดสอบผ่าน curl แล้ว แต่ไม่มี
+arrow เข้าในไดอะแกรมนี้เพราะยังไม่มี client code เรียกใช้จริงในรอบนี้ — capture point ทั้ง 6 ของ
+`game_events` เป็น server-authoritative ล้วน (ดู GAME_WIKI.md §5.7)
+
 ---
 
 ## B.3 Sequence Diagrams — Flow ที่มี Stability Risk เกี่ยวข้อง
@@ -255,6 +275,15 @@ erDiagram
 - **`PlayerStats`/`PlayerSkills` เป็น per-run ล้วน** — สร้างใหม่ทุกครั้งที่ `ServerPlayer` constructor ทำงาน (ตอน join match) ค่าที่เห็นระหว่างเล่นหายหมดตอนจบเกม สิ่งที่ persist ต่อคือ **ผลลัพธ์** (coins ที่ได้, kills ที่นับ) ไม่ใช่ state ระหว่างเล่น
 - **`SkillTreeNode`/`GearItem`/`TraitOption` เป็น static design-time data** — เหมือนกันทุก user ไม่มีการเปลี่ยนแปลงต่อ instance (ต่างจาก 3 entity ข้างบนที่เป็น per-user data)
 
+**Telemetry entities (แยก DB, ไม่รวมในไดอะแกรมข้างบน)** — `game_events`/`error_log` อยู่คนละไฟล์
+(`telemetry.db`) จาก entity ทั้งหมดข้างบน (`game.db`) โดยสิ้นเชิง ไม่มี FK เชื่อมกันจริงระดับ DB
+(`run_id`/`player_id` เป็น soft-correlation ระดับ application logic เท่านั้น ไม่ enforce):
+- `game_events` — `run_id` (generate ที่ `GameRoom.start()` ด้วย `crypto.randomUUID()`), `player_id`
+  nullable (room-level event เช่น `run_start`/`wave_reached`/`boss_kill` ไม่ผูก player),
+  `event_type`, `payload` (TEXT, JSON.stringify ต่อ event_type — ดู GAME_WIKI.md §5.7)
+- `error_log` — unique ด้วย `signature_hash` เท่านั้น ไม่มี FK ไปที่ entity อื่นเลย (`source`/`category`
+  เป็น string ล้วน) — ดู GAME_WIKI.md §5.7 สำหรับ dedup logic เต็ม
+
 ---
 
 ## B.5 Refactor Roadmap
@@ -297,6 +326,9 @@ erDiagram
 | 16 | สองระบบคำศัพท์คู่ขนาน rarity/tier (§4.7) | เอกสาร/ไม่ต้องแก้โค้ด — เพิ่ม comment อธิบาย mapping ให้ชัดในที่เดียว | **S** |
 | 17 | Duplicated "nearest player" logic ใน boss abilities (§3.7) | Extract helper `findNearestAlivePlayer(monster, alivePlayers)` ใช้ร่วมกัน 4 จุด | **S** |
 | 18 | vaultInventory ไม่มี cap (§2.6) | เพิ่ม `MAX_VAULT_SIZE` constant + เช็คก่อน push (ถ้าต้องการ) | **S** |
+| 23 | ✅ **ลดความเสี่ยงแล้ว 2026-09-11** — ~~`/api/telemetry/events`/`/errors` ไม่มี auth เลย~~ (§5.8, ใหม่) | เพิ่ม `isTelemetryRateLimited()` (`server.ts`) — 40 req/60วิ ต่อ IP แยก limiter จาก `auth.ts`'s login limiter (threshold คนละแบบ) คู่กับ payload cap เดิม — ทดสอบผ่าน curl (40×200 ตามด้วย 429 ต่อเนื่อง) ยืนยันแล้ว | **S** — เสร็จแล้ว |
+| 24 | `telemetry.db` ไม่มี retention/prune policy (§5.8, ใหม่) | เพิ่ม cron/startup job ลบ `game_events`/`error_log` เก่ากว่า N วัน (N ยังไม่กำหนด — รอ user ตัดสินใจ retention window) | **S** — ยังไม่ทำ ตั้งใจเลื่อนไว้ก่อนตามที่ระบุใน spec |
+| 25 | ไม่มี dashboard อ่าน telemetry (§5.8, ใหม่) | ต้องอ่านผ่าน SQLite client ตรงๆ ไปก่อน — ทำ dashboard ทีหลังถ้า query pattern ที่ต้องการชัดเจนขึ้น | **M** — ยังไม่ทำ |
 
 ---
 
@@ -312,6 +344,8 @@ erDiagram
 - **`/api/progression` ไม่ validate schema** (พบใหม่ใน B.1) — ตั้งใจเลื่อนไว้ก่อนสำหรับ scale ปัจจุบัน (friend-testing) มี comment ยืนยันชัดเจนทั้งใน `server.ts` และ `db.ts`
 - **Skill Tree เป็น account-wide/shared ข้ามคลาส ไม่ใช่ per-character** (GAME_WIKI §1.7) — ทุกฮีโร่แชร์ `allocatedNodes` เดียวกัน เป็นดีไซน์ตั้งใจของระบบปัจจุบัน (ผู้ใช้เคยถามเรื่อง per-character level แยกไว้เป็นข้อเสนอแยกต่างหาก ยังไม่ได้ตัดสินใจทำ)
 - **Reroll/Banish/Lock potion เริ่มที่ 0 ต้องปลดผ่าน Skill Tree** (GAME_WIKI §4.6) — เปลี่ยนจากฟรีทุกคนเป็นต้องลงทุนแล้ว ตั้งใจ ผู้เล่นเก่าจะเหลือ 0 ทันทีหลังอัพเดต ไม่ใช่บั๊ก
+- **`/api/telemetry/events`/`/errors` ไม่มี auth** (GAME_WIKI §5.7-5.8, ใหม่) — ตั้งใจตามที่ user อนุมัติตอน spec approval ให้สอดคล้องกับ `/api/grant-gold` เดิม (ไม่ใช่ `/api/progression`'s `requireAuth()` pattern) เพราะ guest ที่ยังไม่ login ก็ต้อง report telemetry/error ได้ — ป้องกันด้วย payload cap (≤50 items/request, string cap 4000 ตัวอักษร) **+** per-IP rate limit (40 req/60วิ, เพิ่มหลัง risk audit 2026-09-11) แทน auth
+- **`process.on('uncaughtException'/'unhandledRejection')` ต้อง `process.exit(1)` เสมอหลัง log telemetry** (GAME_WIKI §5.7, ใหม่) — ไม่ใช่ทางเลือก: การเพิ่ม handler พวกนี้เข้ามาเลย (ไม่เคยมีมาก่อนในโปรเจกต์) ทำให้ Node หยุด exit อัตโนมัติตามดีฟอลต์ ถ้าไม่เรียก `process.exit(1)` เองจะกลายเป็นรันต่อในสถานะ process ที่อาจพังแล้วไปเรื่อยๆ แทนที่จะ crash-restart ผ่าน pm2 เหมือนพฤติกรรมเดิม — `shutdownTelemetry()` (synchronous flush) ต้องเกิดก่อน `exit()` เสมอ กันรายงาน crash หายไปพร้อม process
 
 ---
 

@@ -47,7 +47,7 @@ export class HordeDirector {
   // 5/10/15/20/25 — those can't soft-lock the room since a normal wave always follows them).
   private bossEncounterTimer: number = 0;
 
-  constructor(stageId: number = 1) {
+  constructor(stageId: number = 1, private onWaveChange?: (wave: number) => void) {
     this.setStage(stageId);
   }
 
@@ -106,6 +106,7 @@ export class HordeDirector {
       if (this.currentWave % 3 === 0) {
         this.pendingTomeDrop = true;
       }
+      this.onWaveChange?.(this.currentWave);
     }
 
     const newSpawns: SpawnRequest[] = [];

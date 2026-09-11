@@ -17,6 +17,11 @@ import { AuthGateUI } from './ui/AuthGateUI';
 import { MainMenuUI, GameMode } from './ui/MainMenuUI';
 import { RoomBrowserUI } from './ui/RoomBrowserUI';
 import { GAME_CONSTANTS } from '../shared/constants';
+import { ClientTelemetry } from './telemetry/ClientTelemetry';
+
+// Attached as early as possible (module load, before GameApp/DOMContentLoaded) so even an
+// error thrown during startup gets captured, not just ones during actual gameplay.
+ClientTelemetry.init();
 
 const DEVICE_ID_KEY = 'torment_device_id';
 
@@ -470,6 +475,9 @@ class GameApp {
   private setupNetwork(): void {
     this.ws.onopen = () => {
       console.log('⚔️ Connected to Torment 2.5D Dedicated Server!');
+      if (this.reconnectAttempts > 0) {
+        ClientTelemetry.reportWsReconnect(this.reconnectAttempts);
+      }
       this.reconnectAttempts = 0;
       this.hideConnectionBanner();
       this.send({
@@ -498,12 +506,14 @@ class GameApp {
     };
 
     this.ws.onclose = () => {
+      ClientTelemetry.reportWsDisconnect('websocket closed');
       this.scheduleReconnect();
     };
 
     this.ws.onerror = (event) => {
-      // 'close' always follows 'error' for a WebSocket — onclose owns the actual retry so
-      // it isn't scheduled twice; this is just for visibility while debugging.
+      // 'close' always follows 'error' for a WebSocket — onclose owns the actual retry AND the
+      // ws_disconnect telemetry report, so this doesn't also report one (would double-count the
+      // same disconnect); this is just for visibility while debugging.
       console.warn('⚠️ WebSocket error:', event);
     };
 
@@ -844,8 +854,19 @@ class GameApp {
   }
 
   private loop = (): void => {
+    // Scheduled unconditionally, before the try below, so a thrown error this frame still
+    // doesn't stop future frames from rendering — it just means this one frame's draw got
+    // skipped instead of the whole game silently freezing.
     requestAnimationFrame(this.loop);
 
+    try {
+      this.renderFrame();
+    } catch (err) {
+      ClientTelemetry.reportRenderError(err);
+    }
+  };
+
+  private renderFrame(): void {
     const now = performance.now() / 1000;
     const dt = Math.min(0.1, now - this.lastFrameTime);
     this.lastFrameTime = now;
@@ -916,7 +937,7 @@ class GameApp {
       ctx.stroke();
       ctx.restore();
     }
-  };
+  }
 }
 
 // Start application — mandatory login gate, then a main-menu mode choice, before the

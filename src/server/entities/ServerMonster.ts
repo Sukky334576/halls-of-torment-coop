@@ -25,6 +25,10 @@ export class ServerMonster implements GridEntity {
 
   public isBoss: boolean = false;
   public bossName?: string;
+  // Wall-clock spawn time — used only for boss_kill telemetry's timeSinceSpawnMs (see
+  // GameRoom.damageMonster's isBoss branch). Fine as a real timestamp rather than something
+  // tick-relative since it's never compared across a save/restore boundary.
+  public readonly spawnedAt: number = Date.now();
   public attackTimer: number = Math.random() * 1.5; // Stagger initial attacks
   // Bosses used to have no attacks beyond the default melee chaser's contact damage — same AI
   // as a basic skeleton, just tankier. These two generic timers back whatever special moves

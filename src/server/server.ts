@@ -9,6 +9,9 @@ import { ClientMessage, ServerMessage, PlayerClass, RoomSummary } from '../share
 import { GameRoom } from './engine/GameRoom';
 import { createUser, findUserByUsername, findUserById, getProgression, setProgression } from './db';
 import { hashPassword, verifyPassword, signToken, verifyToken, isRateLimited, USERNAME_RE, MIN_PASSWORD_LENGTH } from './auth';
+import { logGameEvent, logError, shutdownTelemetry } from './telemetry/TelemetryBuffer';
+import { SERVER_BUILD_VERSION } from './telemetry/buildVersion';
+import type { GameEventType, ErrorCategory } from '../shared/telemetryTypes';
 
 interface ConnectedClient {
   ws: WebSocket;
@@ -339,6 +342,116 @@ async function handleSaveProgression(req: http.IncomingMessage, res: http.Server
   sendJson(res, 200, { success: true });
 }
 
+// --- Telemetry ingest: POST /api/telemetry/events, POST /api/telemetry/errors ---
+// Deliberately unauthenticated, like /api/grant-gold — this project's other no-auth internal
+// endpoint (see testing_phase_known_risks memory) — rather than requireAuth()'d like
+// /api/progression: telemetry has to accept reports from guests too (never logged in is a fully
+// supported way to play, see AuthClient's comment). Guarded instead by two independent caps: a
+// per-IP request-rate limit (isTelemetryRateLimited, below) and a per-request payload cap
+// (MAX_TELEMETRY_BATCH/MAX_TELEMETRY_STRING) — together they bound both "how often" and "how
+// much per hit" a spammer (or a runaway client bug) can push, without needing a login.
+const MAX_TELEMETRY_BATCH = 50;
+const MAX_TELEMETRY_STRING = 4000;
+
+// A dedicated limiter, not auth.ts's isRateLimited() (that one is tuned for login brute-force —
+// 8 attempts/60s — far stricter than telemetry's legitimate traffic: ClientTelemetry alone
+// flushes every 3s whenever it has something queued, ~20 req/min from one healthy client during
+// an error burst). 40/60s per IP gives headroom over that normal cadence while still bounding a
+// deliberate spammer to a fixed ceiling — the batch/string caps above are the primary defense,
+// this is a second layer against sheer request volume specifically.
+const TELEMETRY_RATE_WINDOW_MS = 60_000;
+const MAX_TELEMETRY_REQUESTS_PER_WINDOW = 40;
+const telemetryRequestLog = new Map<string, number[]>();
+
+function isTelemetryRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const attempts = (telemetryRequestLog.get(ip) || []).filter((t) => now - t < TELEMETRY_RATE_WINDOW_MS);
+  attempts.push(now);
+  telemetryRequestLog.set(ip, attempts);
+  return attempts.length > MAX_TELEMETRY_REQUESTS_PER_WINDOW;
+}
+
+function capString(value: unknown, max: number = MAX_TELEMETRY_STRING): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value.length > max ? value.slice(0, max) : value;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+async function handleTelemetryEvents(req: http.IncomingMessage, res: http.ServerResponse) {
+  if (isTelemetryRateLimited(getClientIp(req))) {
+    return sendJson(res, 429, { success: false, error: 'Too many telemetry requests — try again shortly' });
+  }
+  let body: { events?: unknown[] };
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    return sendJson(res, 400, { success: false, error: 'Invalid JSON body' });
+  }
+  const events = Array.isArray(body.events) ? body.events.slice(0, MAX_TELEMETRY_BATCH) : [];
+  let accepted = 0;
+  for (const raw of events) {
+    const e = asRecord(raw);
+    if (!e) continue;
+    const runId = capString(e.runId, 200);
+    const eventType = capString(e.eventType, 40);
+    if (!runId || !eventType || typeof e.elapsedMs !== 'number' || typeof e.partySize !== 'number') continue;
+    // elapsed_ms is a client-reported DURATION (safe from clock skew — it's a relative span, not
+    // an absolute time), but created_at is always server time below, never anything the client
+    // supplies — see the telemetry spec's guard against trusting client wall-clock.
+    logGameEvent({
+      runId,
+      playerId: capString(e.playerId, 200),
+      playerClass: capString(e.playerClass, 40) as PlayerClass | undefined,
+      stageId: typeof e.stageId === 'number' ? e.stageId : undefined,
+      partySize: e.partySize,
+      buildVersion: capString(e.buildVersion, 100) || 'unknown-client',
+      eventType: eventType as GameEventType,
+      wave: typeof e.wave === 'number' ? e.wave : undefined,
+      elapsedMs: e.elapsedMs,
+      payload: asRecord(e.payload)
+    });
+    accepted++;
+  }
+  sendJson(res, 200, { success: true, accepted });
+}
+
+async function handleTelemetryErrors(req: http.IncomingMessage, res: http.ServerResponse) {
+  if (isTelemetryRateLimited(getClientIp(req))) {
+    return sendJson(res, 429, { success: false, error: 'Too many telemetry requests — try again shortly' });
+  }
+  let body: { errors?: unknown[] };
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    return sendJson(res, 400, { success: false, error: 'Invalid JSON body' });
+  }
+  const errors = Array.isArray(body.errors) ? body.errors.slice(0, MAX_TELEMETRY_BATCH) : [];
+  let accepted = 0;
+  for (const raw of errors) {
+    const e = asRecord(raw);
+    if (!e) continue;
+    const category = capString(e.category, 40);
+    const message = capString(e.message, 500);
+    if (!category || !message) continue;
+    // client_info is whitelisted to browser/os/screen by ClientTelemetry itself before this ever
+    // ships — never IP or a device fingerprint (see the telemetry spec's guard on this field).
+    logError({
+      source: 'client',
+      category: category as ErrorCategory,
+      message,
+      stackTrace: capString(e.stackTrace),
+      context: asRecord(e.context),
+      clientInfo: asRecord(e.clientInfo),
+      buildVersion: capString(e.buildVersion, 100)
+    });
+    accepted++;
+  }
+  sendJson(res, 200, { success: true, accepted });
+}
+
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -366,6 +479,14 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === '/api/progression' && req.method === 'POST') {
     safeHandler(handleSaveProgression)(req, res);
+    return;
+  }
+  if (url.pathname === '/api/telemetry/events' && req.method === 'POST') {
+    safeHandler(handleTelemetryEvents)(req, res);
+    return;
+  }
+  if (url.pathname === '/api/telemetry/errors' && req.method === 'POST') {
+    safeHandler(handleTelemetryErrors)(req, res);
     return;
   }
 
@@ -414,6 +535,48 @@ const HOST = process.env.HOST || '127.0.0.1';
 server.listen(PORT, HOST, () => {
   const mode = IS_PRODUCTION ? 'production' : 'development';
   console.log(`🗡️ [Torment of Souls] Dedicated Game Server running on ${HOST}:${PORT} (${mode} mode)`);
+});
+
+/** Records the crash to telemetry, then exits — this project never had an uncaughtException/
+ * unhandledRejection handler before this feature, so the default Node behavior (print + exit 1)
+ * is what pm2's crash-restart today relies on. Adding a handler at all suppresses that default
+ * exit unless it's called explicitly here, so this MUST still exit(1) itself, not just log and
+ * keep running — silently continuing after a truly uncaught exception in a now-possibly-
+ * corrupted process would be worse than today's clean crash-and-restart, not an improvement.
+ * shutdownTelemetry() flushes synchronously (better-sqlite3 has no async path) so the crash
+ * report is actually on disk before process.exit() tears everything down. */
+function reportFatalAndExit(err: unknown): never {
+  try {
+    const e = err instanceof Error ? err : new Error(String(err));
+    logError({
+      source: 'server',
+      category: 'server_exception',
+      message: e.message,
+      stackTrace: e.stack,
+      topFrame: (e.stack || '').split('\n')[1]?.trim(),
+      buildVersion: SERVER_BUILD_VERSION
+    });
+    shutdownTelemetry();
+  } catch (telemetryErr) {
+    console.error('[telemetry] failed to record fatal crash:', telemetryErr);
+  }
+  process.exit(1);
+}
+
+process.on('uncaughtException', (err) => {
+  console.error('💥 Uncaught exception — logging to telemetry, then exiting:', err);
+  reportFatalAndExit(err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('💥 Unhandled rejection — logging to telemetry, then exiting:', reason);
+  reportFatalAndExit(reason);
+});
+
+process.on('SIGTERM', () => {
+  console.log('🛑 SIGTERM received — flushing telemetry before exit');
+  shutdownTelemetry();
+  process.exit(0);
 });
 
 function sendToClient(id: string, msg: ServerMessage) {

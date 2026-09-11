@@ -2,6 +2,7 @@ import { PlayerClass, PlayerStats, PlayerNetworkData, PlayerSkills, ShrineType }
 import { CLASS_DEFINITIONS, DEFAULT_PLAYER_SKILLS, CLASS_STARTER_SKILLS } from '../../shared/classes';
 import { GAME_CONSTANTS } from '../../shared/constants';
 import { GridEntity } from '../engine/SpatialGrid';
+import type { DeathCause } from '../../shared/telemetryTypes';
 
 export class ServerPlayer implements GridEntity {
   public id: string;
@@ -86,6 +87,12 @@ export class ServerPlayer implements GridEntity {
   // handleUsePotion validate against this instead of trusting whatever traitId the client
   // sends, so a modified client can't apply/banish/lock a card it was never shown.
   public currentTraitChoiceIds: Set<string> = new Set();
+
+  // Set by takeDamage()/applyTrueDamage() the moment isDead flips true, read straight back off
+  // by GameRoom.logDeathEvent() right after the call that returned true — avoids threading a
+  // telemetry buffer reference into ServerPlayer itself just to report one field (fatalHitDamage)
+  // that only this method can compute (post-armor-reduction actualDamage).
+  public lastDeathCause?: { cause: DeathCause; fatalHitDamage: number; wasOneShot: boolean };
 
   constructor(id: string, name: string, playerClass: PlayerClass) {
     this.id = id;
@@ -262,7 +269,7 @@ export class ServerPlayer implements GridEntity {
     return actual;
   }
 
-  public takeDamage(amount: number): boolean {
+  public takeDamage(amount: number, source?: DeathCause): boolean {
     // Ghosted while picking a level-up card so co-op doesn't have to pause for the whole team,
     // and while disconnected so nobody can farm a reconnecting player's idle body for free.
     if (this.isDead || this.invulnerableTimer > 0 || this.dashDuration > 0 || this.isChoosingTrait || this.isDisconnected) return false;
@@ -284,6 +291,7 @@ export class ServerPlayer implements GridEntity {
     const damageReduction = 100 / (100 + armor * 5);
     const actualDamage = Math.max(1, Math.round(amount * damageReduction));
 
+    const hpBeforeHit = this.stats.hp;
     this.stats.hp -= actualDamage;
     if (this.stats.hp <= 0) {
       if (this.skills?.nineLives && !this.skills.nineLivesUsed) {
@@ -296,6 +304,9 @@ export class ServerPlayer implements GridEntity {
       this.stats.hp = 0;
       this.isDead = true;
       this.reviveTimer = 0;
+      if (source) {
+        this.lastDeathCause = { cause: source, fatalHitDamage: actualDamage, wasOneShot: hpBeforeHit >= this.stats.maxHp };
+      }
       return true; // Just died
     }
     return false;
@@ -309,14 +320,18 @@ export class ServerPlayer implements GridEntity {
    * isDead exactly like takeDamage() does: those mean the player is already out of the fight
    * entirely, not a defense that an unavoidable execute should have to punch through.
    */
-  public applyTrueDamage(amount: number): boolean {
+  public applyTrueDamage(amount: number, source?: DeathCause): boolean {
     if (this.isDead || this.isChoosingTrait || this.isDisconnected) return false;
 
+    const hpBeforeHit = this.stats.hp;
     this.stats.hp -= amount;
     if (this.stats.hp <= 0) {
       this.stats.hp = 0;
       this.isDead = true;
       this.reviveTimer = 0;
+      if (source) {
+        this.lastDeathCause = { cause: source, fatalHitDamage: amount, wasOneShot: hpBeforeHit >= this.stats.maxHp };
+      }
       return true; // Just died
     }
     return false;

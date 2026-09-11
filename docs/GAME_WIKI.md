@@ -15,6 +15,8 @@
 | 2026-09-11 | พบและแก้ risk ใหม่ #20 (IMP hitbox radius 12→16 — visual-vs-hitbox mismatch) จาก user report ธนู archer โดนค้างคาวแต่ไม่มี dmg | `docs/archive/2026-09-11-imp-hitbox-fix.md` |
 | 2026-09-11 | พบและแก้ risk ใหม่ #21 ("Return to Hub" หลังบอสตายค้างเกม — `victoryPending` ไม่เคยตั้ง `isOver`) จาก user report กดกลับสู่เกมหลังจบบอสแล้วเกมค้าง ต้องกดยอมแพ้เพื่อออก | `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md` |
 | 2026-09-11 | Risk audit หลังแก้ #21: เปลี่ยน RETURN_TO_HUB จาก fixed-delay (150ms) เป็น ack-based (`RETURN_TO_HUB_ACK` + fallback timeout 800ms) + พบและแก้ risk ใหม่ #22 (`requireAuth` ไม่เช็คว่า user ยังมีอยู่จริง ทำ `POST /api/progression` พังแบบ unhandled 500 ถ้า token เก่ากว่า DB) | `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md` |
+| 2026-09-11 | เพิ่มระบบ Telemetry & Error Logging ใหม่ทั้งระบบ (`telemetry.db` แยกจาก `game.db`, ตาราง `game_events`+`error_log`, `TelemetryBuffer` batched flush, capture point ฝั่ง server 6 event type + client error capture) — ดู §5.7-5.8 ใหม่ + risk #23, #24 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-11 | Risk audit หลังพัฒนา telemetry (user ขอ "ลดความเสี่ยงให้ต่ำที่สุด"): เพิ่ม per-IP rate limit บน telemetry endpoint (แก้ risk #23), เพิ่ม `run_end` ให้ผู้เล่น co-op ที่ surrender ระหว่างทีมเล่นต่อด้วย (เดิมไม่มี), เพิ่ม `checkMonsterSanity()` คู่กับ `checkPlayerSanity()` เดิม | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 
 ## สารบัญ
 
@@ -636,6 +638,94 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 - ✅ **พบและแก้แล้ว (2026-09-11)** — 🔴 **สูง — "Return to Hub" หลังบอสตายทำเกมค้าง (`victoryPending` ไม่เคยตั้ง `isOver`)**: บอส Lord of Torment ตาย (`GameRoom.ts:2645-2652`) ตั้ง `victoryPending=true` freeze โลกรอผู้เล่นเลือก Continue แต่ไม่เคยตั้ง `isOver=true` — client เดิมกดปุ่ม "กลับสู่ล็อบบี้" (`HUD.ts:249-251`) แค่ `window.location.reload()` ไม่แจ้ง server เลย พอ reload ต่อ socket ใหม่ ส่ง `JOIN_LOBBY` resume-check (`server.ts:476-490`) เห็นห้องยัง `isStarted && !isOver` จึงลากกลับเข้าห้องเดิมที่ยัง freeze อยู่แทนที่จะไป lobby → หน้าจอค้างเหมือน pause ไม่มีเมนู ต้องกดยอมแพ้เพื่อออก เกิดเหมือนกันทั้ง solo/coop (ไม่ใช่ solo-only ตามที่ user เจอครั้งแรก) — comment ใน `handleSurrender()` (`GameRoom.ts:438-441`) อธิบาย bug class นี้ไว้ตรงๆ อยู่แล้วและเคยแก้ให้ปุ่มยอมแพ้แล้ว แต่ไม่เคยพอร์ตมาใช้กับ flow ชนะบอส แก้โดยเพิ่ม `handleReturnToHub()` (คู่ขนานกับ `handleSurrender` แต่ไม่มี gold penalty/ไม่ resend GAME_OVER) + message ใหม่ `RETURN_TO_HUB` + ack round-trip (`RETURN_TO_HUB_ACK`, fallback timeout 800ms) ก่อน client reload (`src/shared/types.ts`, `src/shared/constants.ts`, `src/server/engine/GameRoom.ts`, `src/server/server.ts`, `src/client/ui/HUD.ts`, `src/client/main.ts`, test: `GameRoom.test.ts`, spec: `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md`) — พบจาก user report "กดกลับสู่เกมหลังจบบอสแล้วเกมค้าง ต้องกดยอมแพ้เพื่อออก"
 - ✅ **พบและแก้แล้ว (2026-09-11)** — 🟡 **กลาง — `requireAuth()` ไม่เช็คว่า user ยังมีอยู่จริง ทำ `POST /api/progression` พังแบบ unhandled 500**: `requireAuth()` (`server.ts:222-231`) เดิมเช็คแค่ JWT signature ถูกต้อง (`verifyToken()`) ไม่เคยเช็คว่า `uid` ที่ decode ได้ยังมีแถวอยู่จริงใน `users` table — TOKEN_TTL 30 วันทำให้ token ที่ออกไว้ก่อนหน้า (เช่น dev DB ถูกล้าง/สร้างใหม่, หรือ account ถูกลบ) ยัง verify ผ่านอยู่ `GET /api/progression` ไม่พังเพราะ `SELECT` กับ id ที่ไม่มีอยู่แค่คืนค่าเปล่า แต่ `POST`'s `INSERT INTO progression` มี `FOREIGN KEY REFERENCES users(id)` เลย throw `SqliteError` ไม่มีใคร catch จนกลายเป็น 500 พบระหว่างทดสอบสด fix ด้านบน (ไม่เกี่ยวข้องกันเลย คนละ root cause) แก้โดยเพิ่ม `findUserById(payload.uid)` ใน `requireAuth()` ถ้าไม่พบให้ตอบ 401 เหมือนกรณี token ขาด/ผิด (`src/server/server.ts`, spec: `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md`) — ไม่มี unit test เพิ่ม เพราะ `server.ts` ทั้งไฟล์ไม่มี test harness ในโปรเจกต์นี้ (import จะเริ่ม HTTP+WS listener จริงทันที) ยืนยันด้วย manual E2E แทน (500 → 401 ทั้ง server log และ network tab)
 
+### 5.7 ระบบ Telemetry & Error Logging
+
+ที่มา: `src/server/telemetry/` (ใหม่ทั้งโฟลเดอร์), `src/shared/telemetryTypes.ts`, hook เข้า
+`src/server/engine/GameRoom.ts` หลายจุด, `src/client/telemetry/ClientTelemetry.ts`, route ใหม่ใน
+`server.ts`
+
+**DB แยกไฟล์**: `telemetry.db`/`telemetry.dev.db` (WAL mode, `telemetryDb.ts`) แยกจาก `game.db`
+โดยสิ้นเชิง — 2 ตาราง:
+- `game_events` — gameplay telemetry: `run_start | level_up_choice | death | wave_reached | boss_kill | run_end`
+- `error_log` — dedup ด้วย `signature_hash` (sha1 ของ message ที่ normalize uuid/player-id/ตัวเลขออก
+  แล้ว — ดู `signatureHash.ts`) พร้อม `occurrence_count`/`status` (`open`/`fixed`) ให้ไล่ปิดบั๊กได้
+
+**TelemetryBuffer** (`TelemetryBuffer.ts`): buffer เข้า memory ล้วน (`logEvent`/`logError`) แล้ว
+flush เป็น batch ผ่าน `db.transaction()` ทุก 1 วิ — **ไม่มี DB write ใน tick() call path โดยตรงเลย**
+(`better-sqlite3` synchronous ล้วน write ตรงจาก tick() จะ block 25Hz loop) flush ที่ fail ถูก
+try/catch กลืนไว้ ไม่ throw ออกไปกระทบ caller `MAX_PENDING_EVENTS=5000` กัน caller ที่พังไม่ให้ buffer
+โตไม่จำกัด
+
+**Capture point ฝั่ง server** (ทั้งหมดอยู่ใน `GameRoom.ts`):
+
+| Event | Hook จริง | หมายเหตุ |
+|---|---|---|
+| `run_start` | `start()` — generate `run_id` ด้วย `crypto.randomUUID()` | server-only เสมอ ไม่เชื่อ client |
+| `level_up_choice` | `handleSelectTrait()` ก่อน `trait.apply()` (`GameRoom.ts:277`) | payload: offered/picked/rarity/currentRank |
+| `death` | `ServerPlayer.takeDamage()`/`applyTrueDamage()` เพิ่ม param `source: DeathCause` ทุก call site | ดู "Death cause tagging" ด้านล่าง |
+| `wave_reached` | `HordeDirector`'s `currentWave++` ผ่าน callback `onWaveChange` ใหม่ (constructor param) | ต่อห้อง ไม่ผูก player |
+| `boss_kill` | `damageMonster()`'s `if (monster.isBoss)` block | เพิ่ม `ServerMonster.spawnedAt` ใหม่ คำนวณ `timeSinceSpawnMs` |
+| `run_end` | `broadcastGameOver()` (จุดเดียวที่ทุกทางจบแมตช์จริงไหลผ่าน: wipe/surrender-as-last-player/boss-enrage-execute/boss victory — log 1 row ต่อผู้เล่นที่ยังอยู่ในห้อง) **+** `handleSurrender()`'s co-op branch (เรียก `logRunEndFor()` เดียวกันตรงๆ) | ผู้เล่น co-op ที่ surrender ระหว่างทีมยังเล่นต่อได้ `run_end` (`outcome:'surrender'`) แยกของตัวเองด้วย แม้ room/`run_id` จะยังไม่จบ — ผ่าน helper `logRunEndFor()` ที่ทั้งสองจุดเรียกร่วมกัน |
+
+**Death cause tagging** (`DeathCause` ใน `telemetryTypes.ts`): `sourceType` มี 4 แบบ —
+`monster_contact` (contact dmg loop) / `projectile` (ยิงปกติจากมอนธรรมดาหรือมอนที่เป็นบอส) /
+`boss_ability` (Ground Slam, Boulder Toss, Void Barrage, Hellfire Spit — แท็กผ่าน field ใหม่
+`Projectile.sourceMonsterType`/`sourceAbilityId` ที่ตั้งตอนสร้าง projectile ทั้ง 4 จุด) /
+`execute_deadline` (final-boss timeout execute) `fatalHitDamage`/`wasOneShot` คำนวณจาก hp ก่อน-หลัง
+โดน hit ภายใน `takeDamage()`/`applyTrueDamage()` เอง เก็บไว้ที่ `ServerPlayer.lastDeathCause` ให้
+`GameRoom.logDeathEvent()` อ่านทันทีที่ return `true`
+
+**Capture point ฝั่ง client** (`ClientTelemetry.ts`, hook เข้า `main.ts`): `window.onerror`/
+`onunhandledrejection` (module scope, ติดตั้งก่อน `DOMContentLoaded`), render loop try/catch (`loop()`
+แยก body ออกเป็น `renderFrame()` เพื่อครอบ try/catch ได้โดยไม่กระทบการ schedule
+`requestAnimationFrame` เฟรมถัดไป), `ws.onclose`→`ws_disconnect`, `ws.onopen` (เมื่อ
+`reconnectAttempts>0`)→`ws_reconnect` — **`ws.onerror` ไม่ log แยก** (comment เดิมในโค้ดยืนยัน `close`
+ตามหลัง `error` เสมอ กัน double-count) buffer เอง ส่ง batch ทุก 3 วิไปที่ `POST /api/telemetry/errors`
+
+**Server-side error capture ใหม่**: `process.on('uncaughtException'/'unhandledRejection')`
+(ไม่เคยมีมาก่อนในโปรเจกต์นี้) — **สำคัญ**: ต้องเรียก `process.exit(1)` เองหลัง log เสมอ เพราะการเพิ่ม
+handler พวกนี้ทำให้ Node **หยุด exit อัตโนมัติตามดีฟอลต์** — ถ้าไม่ exit เอง จะกลายเป็นรันต่อในสถานะ
+process ที่อาจพังแล้วไปเรื่อยๆ แทนที่จะ crash-restart ผ่าน pm2 เหมือนพฤติกรรมเดิมก่อนมี handler นี้
+(`shutdownTelemetry()` flush แบบ synchronous ก่อน exit เสมอ กันรายงาน crash หายไปพร้อมกับ process)
+เพิ่ม `checkPlayerSanity()`/`checkMonsterSanity()` ใน `tick()`'s alive-player/monster loop ตามลำดับ
+เช็ค NaN position/negative hp (`logic_anomaly` category, clamp กลับเป็นค่าปลอดภัยทันที) — ครอบทั้ง
+`ServerPlayer` และ `ServerMonster` (`ServerMonster` เดิมมี guard เฉพาะ `dist>1e-6` ที่ root cause เก่า
+อยู่แล้ว — risk #11 — `checkMonsterSanity()` เป็น backstop ชั้นที่สองแบบเดียวกับฝั่ง player ไม่ใช่เพราะ
+พบบั๊กใหม่) ยังไม่ได้ wrap ทั้ง tick loop ด้วย try/catch ทั่วไป เพราะไม่มี known throw path ที่ต้อง
+ป้องกันจริง — และการ swallow exception แบบกว้างๆ เสี่ยงซ่อนบั๊กจริงไว้ให้ room รันต่อด้วย state ที่พังแทน
+ที่จะ crash สะอาดๆ ให้ pm2 restart (ดู `process.on('uncaughtException')` ด้านบนที่ทำหน้าที่นี้อยู่แล้ว
+ในระดับ process)
+
+**Transport**: `POST /api/telemetry/events` / `POST /api/telemetry/errors` (ผ่าน nginx proxy `/api/`
+เดิม ไม่ต้องแก้ config) — **ไม่มี auth** เหมือน `/api/grant-gold` (ตั้งใจ ตามที่ user อนุมัติตอน spec)
+การันตีความปลอดภัยด้วย 2 ชั้นแทน auth: (1) per-request cap — ≤50 items/request, string field cap
+4000 ตัวอักษร (`MAX_TELEMETRY_BATCH`/`MAX_TELEMETRY_STRING`) (2) per-IP rate limit ใหม่ (เพิ่มหลัง risk
+audit) — `isTelemetryRateLimited()` (`server.ts`) จำกัด 40 request/60 วิ ต่อ IP (limiter แยกจาก
+`auth.ts`'s `isRateLimited()` ที่ใช้กับ login เพราะ threshold เดิม 8/60วิ เข้มเกินไปสำหรับ traffic
+telemetry ปกติ — `ClientTelemetry` flush ทุก 3 วิเองก็ ~20 req/min อยู่แล้ว) เกิน limit ตอบ `429`
+
+**Build version**: server ใช้ `process.env.BUILD_VERSION || 'dev'` (`buildVersion.ts`) — ต้องตั้ง env
+var ตอน deploy เองถึงจะมีความหมายข้าม deploy ได้จริง ไม่งั้นทุก row จะเป็น `'dev'` เหมือนกันหมด ฝั่ง
+client ใช้ vite `define: __BUILD_VERSION__` (`vite.config.ts`) ที่เปลี่ยนค่าอัตโนมัติทุก
+`npm run build` (timestamp) แม้ไม่ตั้ง env var ก็ตาม
+
+**⚠️ หมายเหตุสำคัญ**: `POST /api/telemetry/events` implementation พร้อมใช้งานเต็มรูปแบบ (ทดสอบผ่าน
+curl แล้ว — ดู dev-update ที่อ้างอิง) **แต่ยังไม่มี client code เรียกจริง** — capture point ทั้ง 6 ของ
+`game_events` เป็น server-authoritative ล้วนในรอบนี้ (ไม่มี game_event ฝั่ง client ที่ต้อง capture)
+endpoint นี้เตรียมไว้สำหรับ client-side game telemetry ในอนาคตเท่านั้น
+
+### 5.8 Stability Risk — Telemetry & Error Logging System
+
+- ✅ **ลดความเสี่ยงแล้ว (2026-09-11, risk audit หลังพัฒนา)** — ~~🟡 กลาง — `/api/telemetry/events`/`/errors` ไม่มี auth เลย~~: ยังไม่มี auth ตามที่ตั้งใจไว้ (สอดคล้องกับ `/api/grant-gold`) แต่เพิ่ม `isTelemetryRateLimited()` (40 req/60วิ ต่อ IP, `server.ts`) เป็นชั้นป้องกันที่สอง คู่กับ per-request cap เดิม — ทดสอบแล้วว่า request ที่ 41+ ใน 60 วิ โดน `429` จริง (curl loop 45 ครั้ง: 40×200, 5×429)
+- 🟢 **ต่ำ — ไม่มี retention/prune policy**: `telemetry.db` โตไปเรื่อยๆ ไม่มี cron/cleanup ตัดข้อมูลเก่า
+  (ตั้งใจไม่ทำตอนนี้ ตามที่ระบุไว้ใน spec ตั้งแต่ต้น)
+- 🟢 **ต่ำ — ไม่มี dashboard**: ต้องอ่านผ่าน SQLite client ตรงๆ (`sqlite3 data/telemetry.db`) ไปก่อน
+- 🟢 **ต่ำ — server crash (uncaught) = ไม่มี `run_end` แถวนั้น**: ต้อง cross-check `run_start` vs
+  `run_end` ที่ไม่ match กันเพื่อประเมิน crash rate ทางอ้อม (ตั้งใจ ไม่ใช่บั๊ก — ดูเหตุผลเรื่อง
+  `process.exit(1)` ด้านบน)
+- 🟢 **ต่ำ — `POST /api/telemetry/events` ยังไม่มี client caller จริง**: เตรียมไว้สำหรับอนาคต ไม่ใช่
+  dead code แต่ก็ไม่ได้ถูกใช้งานในฟีเจอร์ชุดนี้เลย
+
 ---
 
 ## 6. Top Stability Risks (สรุปรวม)
@@ -660,6 +750,7 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 20. ~~IMP hitbox เล็กกว่า sprite ที่วาดมาก (visual-vs-hitbox mismatch)~~ (§3.7) — **✅ แก้แล้ว 2026-09-11** (พบใหม่นอก 19 ข้อเดิม — user report "ธนู archer โดนตัวค้างคาวแต่ไม่โดน dmg เลย")
 10. Tier weight/multiplier เป็น magic number ไม่ใช่ config ปรับได้ (§4.7) — ยังไม่แก้
 11. ~~`ServerMonster.update()` ไม่เช็คว่า target ยังมีชีวิตอยู่~~ (§3.7) — **✅ แก้แล้ว 2026-09-11** (NaN guard สำหรับกรณี dist=0)
+23. ~~`/api/telemetry/events`/`/errors` ไม่มี auth เลย~~ (§5.8) — **✅ ลดความเสี่ยงแล้ว 2026-09-11**: ยังไม่มี auth ตามที่ตั้งใจ (สอดคล้อง `/api/grant-gold`) แต่เพิ่ม per-IP rate limit (40 req/60วิ) เป็นชั้นป้องกันที่สองแล้ว
 
 ### 🟢 ต่ำ — Maintainability (ไม่เร่งด่วน)
 
@@ -670,6 +761,8 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 16. สองระบบคำศัพท์คู่ขนาน rarity string vs tier letter (§4.7) — ยังไม่แก้
 17. Duplicated "หา nearest player" logic ใน boss abilities 4 จุด (§3.7) — ยังไม่แก้
 18. vaultInventory ไม่มี cap (§2.6) — ยังไม่แก้
+24. `telemetry.db` ไม่มี retention/prune policy (§5.8) — ตั้งใจไม่ทำตอนนี้ (friend-testing scale) — ยังไม่แก้
+25. ไม่มี dashboard อ่าน telemetry (§5.8) — ต้องอ่านผ่าน SQLite client ตรงๆ ไปก่อน — ยังไม่แก้
 
 ---
 
