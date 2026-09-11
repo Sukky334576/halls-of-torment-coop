@@ -100,7 +100,11 @@ export class VFX2D {
     }
   }
 
-  public render(ctx: CanvasRenderingContext2D, time: number): void {
+  /** Ground-level layer: dash ghosts, battlefield shrines, pickups. Drawn BEFORE the monster
+   * horde so pickups/shrines sit naturally under monster feet — call this first in the scene,
+   * then the horde, then renderOverlay(). See renderOverlay() for why projectiles are a
+   * separate pass instead of staying in here. */
+  public renderGround(ctx: CanvasRenderingContext2D, time: number): void {
     // 0. Render Dash Ghosts
     for (const g of this.dashGhosts) {
       const alpha = Math.max(0, 1.0 - g.life / g.maxLife) * 0.55;
@@ -432,7 +436,17 @@ export class VFX2D {
 
       ctx.restore();
     }
+  }
 
+  /** Overlay layer: projectiles + hit-spark particles. Drawn AFTER the monster horde (and
+   * before players) so they render IN FRONT of monster sprites instead of underneath them —
+   * previously this was part of the same ground-level render() called before the horde, so at
+   * high monster counts (380+ on a late wave) a projectile flying through/near the pack was
+   * visually hidden behind monster sprites the entire time, even though the server kept
+   * tracking and applying its hit normally. Worst on bosses that spawn adds right on top of
+   * themselves (e.g. Lord of Torment's Void Barrage + Summon Reinforcements) — the orbs could
+   * be invisible from the very frame they spawned. See docs/archive for the investigation. */
+  public renderOverlay(ctx: CanvasRenderingContext2D, time: number): void {
     // 2. Render Projectiles
     for (const proj of this.currentProjectiles) {
       ctx.save();
@@ -1114,6 +1128,30 @@ export class VFX2D {
           ctx.beginPath();
           ctx.arc(0, 0, r * 0.6, 0, Math.PI * 2);
           ctx.stroke();
+          break;
+        }
+
+        case ProjectileType.TITAN_QUAKE_TELEGRAPH: {
+          // Elite Golem Ground Slam wind-up warning — dashed danger-zone ring, no fill impact
+          // yet (that's TITAN_QUAKE_WAVE below, once the real hit lands). Fast pulse so it
+          // reads clearly even during its short ~0.4s window.
+          const r = proj.radius || 180;
+          const pulse = 0.5 + Math.sin(time * 20) * 0.5;
+
+          ctx.fillStyle = `rgba(220, 38, 38, ${(0.07 + pulse * 0.06).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = '#f59e0b';
+          ctx.shadowColor = '#dc2626';
+          ctx.shadowBlur = 10 + pulse * 12;
+          ctx.lineWidth = 4;
+          ctx.setLineDash([16, 10]);
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
           break;
         }
 

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { GameRoom } from './GameRoom';
-import { PlayerClass } from '../../shared/types';
+import { PlayerClass, MonsterType } from '../../shared/types';
 import type { ServerPlayer } from '../entities/ServerPlayer';
+import { ServerMonster } from '../entities/ServerMonster';
 import { TRAIT_POOL } from '../../shared/classes';
 
 /**
@@ -325,5 +326,93 @@ describe('GameRoom final-boss execute deadline (soft-lock fix)', () => {
     const overMsgs = gameOverMessagesFor(sent, 'p1');
     expect(overMsgs).toHaveLength(1);
     expect(overMsgs[0].msg.reason).toBeUndefined(); // plain wipe, not the boss-execute reason
+  });
+});
+
+/** Elite Golem positioned so its Ground Slam range check passes immediately (bossAbilityTimer
+ * already at the 7s cooldown threshold). See updateBossAbilities() in GameRoom.ts. */
+function makeSlamReadyGolem(x: number, y: number): ServerMonster {
+  const golem = new ServerMonster(9001, MonsterType.ELITE_GOLEM, x, y, 1, 1, 1, true, 'Test Golem');
+  golem.bossAbilityTimer = 7; // === SLAM_COOLDOWN, triggers immediately on the next tick
+  return golem;
+}
+
+/** addTestPlayer() gives a fresh 2s spawn-protection invulnerability (ServerPlayer's normal
+ * constructor behavior) which would silently no-op every takeDamage() call below and mask a
+ * real damage bug as a false pass — clear it so these tests actually exercise takeDamage(). */
+function clearSpawnProtection(player: ServerPlayer): void {
+  player.invulnerableTimer = 0;
+}
+
+describe('GameRoom Ground Slam telegraph (Elite Golem, docs/archive/2026-09-11-projectile-zorder-fix.md Fix B)', () => {
+  it('does not damage the player on the cast tick — only starts a non-damaging telegraph', () => {
+    const { room, sent } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.x = 0;
+    player.y = 0;
+    clearSpawnProtection(player);
+    const golem = makeSlamReadyGolem(0, 0); // standing right on top of the player
+
+    (room as any).updateBossAbilities(golem, 0.1, [player]);
+
+    expect(player.stats.hp).toBe(player.stats.maxHp); // no damage yet
+    expect(golem.slamTelegraphTimer).toBeGreaterThan(0); // wind-up started
+    const telegraphMsgs = sent.filter((s) => s.msg.type === 'LEVEL_UP_CHOICE'); // sanity: unrelated
+    expect(telegraphMsgs).toHaveLength(0);
+  });
+
+  it('applies damage only once the telegraph timer runs out', () => {
+    const { room } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.x = 0;
+    player.y = 0;
+    clearSpawnProtection(player);
+    const golem = makeSlamReadyGolem(0, 0);
+
+    (room as any).updateBossAbilities(golem, 0.1, [player]); // cast starts, telegraph = 0.4s
+    expect(player.stats.hp).toBe(player.stats.maxHp);
+
+    (room as any).updateBossAbilities(golem, 0.2, [player]); // 0.2s into the 0.4s wind-up
+    expect(player.stats.hp).toBe(player.stats.maxHp); // still charging, still no damage
+
+    (room as any).updateBossAbilities(golem, 0.2, [player]); // crosses the 0.4s mark — impact
+    expect(player.stats.hp).toBeLessThan(player.stats.maxHp);
+    expect(golem.slamTelegraphTimer).toBe(0);
+  });
+
+  it('lands where it was cast (frozen epicenter), not wherever the golem wanders to mid-charge', () => {
+    const { room } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.x = 0;
+    player.y = 0;
+    clearSpawnProtection(player);
+    const golem = makeSlamReadyGolem(0, 0);
+
+    (room as any).updateBossAbilities(golem, 0.1, [player]); // cast at (0,0)
+    golem.x = 900; // golem "wanders" far away during the wind-up (movement is a separate system)
+    golem.y = 900;
+
+    (room as any).updateBossAbilities(golem, 0.4, [player]); // resolve — player never moved
+
+    // Player standing at the ORIGINAL cast position still takes the hit even though the golem
+    // itself is now nowhere near them — the slam is anchored to where it was cast.
+    expect(player.stats.hp).toBeLessThan(player.stats.maxHp);
+  });
+
+  it('lets a player who moves out of the warning ring during the wind-up avoid the damage', () => {
+    const { room } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.x = 0;
+    player.y = 0;
+    clearSpawnProtection(player);
+    const golem = makeSlamReadyGolem(0, 0); // SLAM_RADIUS = 180
+
+    (room as any).updateBossAbilities(golem, 0.1, [player]); // cast at (0,0)
+    player.x = 500; // dodges far outside SLAM_RADIUS before the impact resolves
+    player.y = 0;
+
+    (room as any).updateBossAbilities(golem, 0.4, [player]); // resolve
+
+    expect(player.stats.hp).toBe(player.stats.maxHp); // dodged successfully
   });
 });

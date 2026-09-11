@@ -10,6 +10,9 @@
 |---|---|---|
 | 2026-09-11 | สร้างเอกสารครั้งแรก (compile จาก source code จริง 5 หมวด + Top Stability Risks) | คำสั่ง user: ใช้ GAME_WIKI.md เป็นฐานข้อมูล วิเคราะห์จาก source จริง |
 | 2026-09-11 | Round 1 functional bugfix: แก้ risk #2 (level-up choices ว่าง), #6 (validate traitId), #9 (potion double-click), #11 (NaN guard), #12 (magic rarity fallback) + ⚠️ Correction risk #5, #7 ที่ล้าสมัย/overstate | `docs/archive/2026-09-11-round1-functional-bugfixes.md` |
+| 2026-09-11 | พบและแก้ risk ใหม่ #19 (กระสุนบอสถูกวาดใต้ฝูงมอน — client z-order bug) จาก user report ตายไม่รู้สาเหตุที่ลาสบอสด่าน 2 | `docs/archive/2026-09-11-projectile-zorder-fix.md` |
+| 2026-09-11 | Fix B: เปลี่ยน ELITE_GOLEM Ground Slam จาก telegraph-free เป็น 2-phase (warning ring 0.4s ก่อนดาเมจ) — §3.3 table correction | `docs/archive/2026-09-11-projectile-zorder-fix.md` |
+| 2026-09-11 | พบและแก้ risk ใหม่ #20 (IMP hitbox radius 12→16 — visual-vs-hitbox mismatch) จาก user report ธนู archer โดนค้างคาวแต่ไม่มี dmg | `docs/archive/2026-09-11-imp-hitbox-fix.md` |
 
 ## สารบัญ
 
@@ -316,7 +319,7 @@ private rollGearDrop(isBoss: boolean): GearItem | undefined {
 |---|---|---|---|---|---|---|---|---|
 | 0 | SKELETON | Skeleton | 25 | 110 | 8 | 16 | 1 | มอนพื้นฐานสุด |
 | 1 | ZOMBIE | Rotting Zombie | 65 | 70 | 15 | 20 | 3 | |
-| 2 | IMP | Crimson Imp | 18 | 180 | 6 | 12 | 2 | เร็วที่สุดในกลุ่มมอนธรรมดา |
+| 2 | IMP | Crimson Imp | 18 | 180 | 6 | 16 | 2 | เร็วที่สุดในกลุ่มมอนธรรมดา — ⚠️ radius แก้จาก 12→16 (2026-09-11, ดู §3.7) |
 | 3 | HELLHOUND | Hellhound | 90 | 210 | 20 | 22 | 5 | เร็วกว่าผู้เล่นทุกคน |
 | 4 | ELITE_GOLEM | Corrupted Golem | 800 | 60 | 35 | 36 | 50 | บอส wave 5/15/20/25 (stage 1) |
 | 5 | LORD_OF_TORMENT | Lord of Torment | 10000 | 90 | 50 | 48 | 500 | บอส wave 30 + endless mode |
@@ -347,7 +350,7 @@ private rollGearDrop(isBoss: boolean): GearItem | undefined {
 
 | Monster | ท่า | Cooldown | เงื่อนไข | ดาเมจ/เอฟเฟกต์ |
 |---|---|---|---|---|
-| ELITE_GOLEM | Ground Slam (melee AOE) | 7s | มีผู้เล่นในระยะ ≤260px | ดาเมจ ×2.5 แก่ทุกคนในรัศมี 180px |
+| ELITE_GOLEM | Ground Slam (melee AOE) | 7s | มีผู้เล่นในระยะ ≤260px | ⚠️ **แก้ 2026-09-11**: เดิม telegraph-free (ดาเมจลงทันทีตอน cast) ตอนนี้เป็น 2 phase — warning ring (`TITAN_QUAKE_TELEGRAPH`, ไม่ดาเมจ) 0.4s ก่อน แล้วค่อยดาเมจ ×2.5 แก่ทุกคนในรัศมี 180px ที่ตำแหน่ง**ตอน cast** (ไม่ใช่ตำแหน่งบอสตอน impact — golem เดินหนีระหว่าง charge ได้ แต่วงระเบิดไม่ตาม) |
 | ELITE_GOLEM | Boulder Toss (ranged) | 5s | ผู้เล่นใกล้สุด 260-650px | `ENEMY_ARROW` ดาเมจ ×1.4 |
 | LORD_OF_TORMENT | Void Barrage (ranged fan 5 นัด) | 6s | ผู้เล่นใกล้สุด ≤550px | `ENEMY_VOID_ORB` ×5 กระจาย ±0.5 rad ดาเมจ ×0.8/นัด |
 | LORD_OF_TORMENT | Reinforcements | 15s | — | Spawn HELLHOUND ปกติ 2 ตัว |
@@ -417,6 +420,8 @@ Stage multiplier: Stage 1 = 1.0/1.0, Stage 2 = 1.6/1.4, Stage 3 = 2.5/2.0 (HP/DM
 - 🟢 **ต่ำ — Boss ability คำนวณ "ผู้เล่นใกล้สุด" ซ้ำ 3-4 รอบ**: โค้ดคล้ายกันสูงใน `updateBossAbilities()` แต่ละท่าต่างคนต่าง loop เอง
 - 🟢 **ต่ำ — `pickMonsterType()` เป็น if-chain ไม่ใช่ data table**: เพิ่ม/แก้สัดส่วนต้องแก้ logic โดยตรง ไม่มีระบบเช็ครวมไม่เกิน 1.0 อัตโนมัติ
 - 🟢 **ต่ำ — HELLHOUND เร็วกว่าผู้เล่นทุกคน**: เป็น design choice ที่ตั้งใจ (คอมเมนต์ยืนยัน) ไม่ใช่บั๊ก แต่ถ้า move speed จาก gear/skill tree สูงพอในอนาคตอาจกลับมาเป็นปัญหาสมดุล
+- ✅ **พบและแก้แล้ว (2026-09-11)** — 🔴 **สูง — กระสุนถูกวาดใต้ฝูงมอนสเตอร์ (client z-order bug)**: `main.ts`'s render pass วาด `vfx.render()` (pickup + **กระสุนทุกชนิด** รวมกระสุนบอส) **ก่อน** `hordeRenderer.render()` (ฝูงมอน) เสมอ — ที่ wave ท้ายๆ ที่มีมอนถึง 380+ ตัว กระสุนที่วิ่งผ่าน/เกิดใกล้ฝูงมอนจะถูกวาดทับจนมองไม่เห็น ทั้งที่ server ยังคำนวณ hit ปกติ → ผู้เล่นรู้สึกว่า "โดนดาเมจไม่รู้สาเหตุ" ชัดเจนที่สุดกับ **LORD_OF_TORMENT** (บอสด่านสุดท้าย wave 30) เพราะ Void Barrage ยิง 5 ลูกพร้อมกัน + Summon Reinforcements เรียก Hellhound มาล้อมตัวเองทุก 15s ทำให้กระสุนโดนบังตั้งแต่เกิด แก้โดยแยก `VFX2D.render()` เป็น `renderGround()` (pickup/shrine, วาดก่อนฝูงมอนเหมือนเดิม) + `renderOverlay()` (กระสุน+particle, ย้ายไปวาด**หลัง**ฝูงมอนแทน) (`src/client/entities/VFX2D.ts`, `src/client/main.ts`, spec: `docs/archive/2026-09-11-projectile-zorder-fix.md`) — พบจาก user report "ตายไม่รู้สาเหตุตอนลาสบอสด่าน 2"
+- ✅ **พบและแก้แล้ว (2026-09-11)** — 🟡 **กลาง — IMP hitbox เล็กกว่า sprite ที่วาดมาก (visual-vs-hitbox mismatch)**: `MONSTER_STATS[IMP].radius` เดิม = 12 (`constants.ts`) — **เล็กที่สุดในเกม** ขณะที่ `HordeSpriteRenderer.ts:145` วาดทุก monster type ที่ 64×64px คงที่ (IMP ไม่มี scale พิเศษ ไม่ได้ผูกกับ `radius` เลย) รวมกับ Archer arrow (`radius: 10`) ได้ combined hit radius แค่ 22px — ผู้เล่นเล็งไปที่ปีก/ขอบ sprite ที่มองเห็น (นอก hitbox จริง) จึงรู้สึกว่า "ธนูโดนชัดๆ แต่ไม่มีดาเมจ" ทั้งที่ server คำนวณ collision ถูกต้อง (`SpatialGrid.queryRadius()` ใช้ `combinedRadius = arrow.radius + monster.radius` แบบ circle-circle ปกติ ไม่มีบั๊ก logic) แก้โดยปรับ `radius: 12→16` (เท่า SKELETON) (`src/shared/constants.ts`, test: `SpatialGrid.impHitbox.test.ts`, spec: `docs/archive/2026-09-11-imp-hitbox-fix.md`) — พบจาก user report "ธนู archer โดนตัวค้างคาวแต่ไม่โดน dmg เลย"
 
 ---
 
@@ -626,6 +631,7 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 1. **Server ไม่ validate `treePassives`/สถิติที่ client ส่งมา** (§1.10) — ช่องโหว่ cheat ตรงที่สุด เกมเป็น co-op แชร์ห้องกับคนอื่น ผู้เล่นคนเดียวแก้ payload กระทบทุกคนในแมตช์ได้ทันที — **ยังไม่แก้** (scope ใหญ่ ต้องแยก Phase ของตัวเอง ดู `GAME_BLUEPRINT.md` Phase 1)
 2. ~~`triggerLevelUpChoices()` อาจส่งการ์ดว่างเปล่าไม่มี fallback~~ (§4.7) — **✅ แก้แล้ว 2026-09-11**
 3. **TICK message ส่ง full state ทุก 40ms ไม่มี delta compression** (§5.6) — payload โตตามจำนวนมอน/ผู้เล่น/เวฟ เป็นความเสี่ยง scaling ระยะยาว — **ยังไม่แก้** (scope ใหญ่)
+19. ~~กระสุนถูกวาดใต้ฝูงมอนสเตอร์ (client z-order bug)~~ (§3.7) — **✅ แก้แล้ว 2026-09-11** (พบใหม่นอก 18 ข้อเดิม — user report "ตายไม่รู้สาเหตุตอนลาสบอสด่าน 2")
 
 ### 🟡 กลาง — ควรแก้รอบถัดไป
 
@@ -635,6 +641,7 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 7. ~~Superconduct chain lightning เรียกตัวเองแบบ recursive ไม่มี guard~~ (§5.6) — **⚠️ Overstate 2026-09-11**: ไม่ recurse จริง (ไม่ส่ง element param ตอน chain)
 8. โค้ดสร้าง JOIN_LOBBY payload/addPlayer ซ้ำหลายจุด (§1.10) — ยังไม่แก้
 9. ~~Race condition ที่ potion action ยิงซ้อนกันได้ไม่มี lock~~ (§4.7) — **✅ แก้แล้ว 2026-09-11** (root cause จริงอยู่ฝั่ง client)
+20. ~~IMP hitbox เล็กกว่า sprite ที่วาดมาก (visual-vs-hitbox mismatch)~~ (§3.7) — **✅ แก้แล้ว 2026-09-11** (พบใหม่นอก 19 ข้อเดิม — user report "ธนู archer โดนตัวค้างคาวแต่ไม่โดน dmg เลย")
 10. Tier weight/multiplier เป็น magic number ไม่ใช่ config ปรับได้ (§4.7) — ยังไม่แก้
 11. ~~`ServerMonster.update()` ไม่เช็คว่า target ยังมีชีวิตอยู่~~ (§3.7) — **✅ แก้แล้ว 2026-09-11** (NaN guard สำหรับกรณี dist=0)
 

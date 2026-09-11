@@ -35,6 +35,15 @@ export class ServerMonster implements GridEntity {
   public statusEffects: Map<ElementStatus, MonsterStatusEffect> = new Map();
   public defenseDebuff: number = 0; // e.g. 0.50 from Superconduct
 
+  // Elite Golem Ground Slam wind-up: >0 while a telegraphed slam is charging, counting down to
+  // the actual impact. slamTelegraphX/Y freeze the epicenter at the moment the cast started, so
+  // a player who dodges away during the wind-up escapes it even if the golem keeps chasing (the
+  // slam lands where it was cast, not wherever the golem wanders to mid-charge). See
+  // GameRoom.updateBossAbilities().
+  public slamTelegraphTimer: number = 0;
+  public slamTelegraphX: number = 0;
+  public slamTelegraphY: number = 0;
+
   constructor(
     id: number,
     type: MonsterType,

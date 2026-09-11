@@ -10,6 +10,9 @@
 |---|---|---|
 | 2026-09-11 | สร้างเอกสารครั้งแรก (Architecture Overview, DFD, Sequence Diagram, ER Diagram, Refactor Roadmap, Known Design Decisions) | คำสั่ง user: ยกระดับจาก GAME_WIKI.md เป็นเอกสารพัฒนา + blueprint |
 | 2026-09-11 | Round 1 functional bugfix: mark Refactor Roadmap #3,6,9,11,12 เป็น ✅ แก้แล้ว, #7 เป็น ⚠️ false positive (ไม่ต้องแก้) | `docs/archive/2026-09-11-round1-functional-bugfixes.md` |
+| 2026-09-11 | พบและแก้ risk ใหม่ #19 (projectile z-order bug) เพิ่มใน Refactor Roadmap Phase 1 | `docs/archive/2026-09-11-projectile-zorder-fix.md` |
+| 2026-09-11 | Fix B: ELITE_GOLEM Ground Slam เปลี่ยนจาก telegraph-free เป็น 2-phase (0.4s warning ring) — sync กับ GAME_WIKI.md §3.3 | `docs/archive/2026-09-11-projectile-zorder-fix.md` |
+| 2026-09-11 | พบและแก้ risk ใหม่ #20 (IMP hitbox radius 12→16) เพิ่มใน Refactor Roadmap Phase 1 | `docs/archive/2026-09-11-imp-hitbox-fix.md` |
 >
 > สร้างเมื่อ 2026-09-11
 
@@ -264,6 +267,8 @@ erDiagram
 | 2 | `/api/progression` POST ไม่ validate schema เลย (พบเพิ่มจาก `db.ts`/`server.ts` comment, เกี่ยวโยง #1) | เพิ่ม schema validation ขั้นต่ำ: เช็คว่าทุก id ใน `allocatedNodes` มีอยู่จริงใน `CLASS_SKILL_TREES`, เช็คว่า `coins` ไม่ติดลบ/ไม่เกินขีดที่เป็นไปได้ตาม `totalKills`/playtime — **หมายเหตุ: ทีมงานรู้อยู่แล้วและตั้งใจเลื่อนไว้ก่อนสำหรับ friend-testing scale (มี comment ยืนยันชัดเจน) — ไม่ใช่ bug ที่ "ลืม" ควรถามทีมก่อนว่าจะยกระดับตอนนี้เลยหรือรอจนใกล้เปิดกว้างจริง** | **M** | ควรทำหลัง #1 เพราะใช้ schema/logic เดียวกันบางส่วน |
 | 3 | ✅ **แก้แล้ว 2026-09-11** — ~~`triggerLevelUpChoices()` อาจส่ง choices ว่างเปล่า, ไม่มี fallback~~ (§4.7) | ใช้แนวทางต่างจากที่วางแผนไว้เล็กน้อย: แทนที่จะส่งการ์ด "OK" ให้กดเปล่าๆ เปลี่ยนเป็นส่ง message ใหม่ `LEVEL_UP_SKIPPED` (heal 25% max HP เป็น consolation) แล้ว resolve pick ให้อัตโนมัติทันทีผ่าน `finishLevelUpChoice()` — ไม่ต้องให้ผู้เล่นกดอะไรเพิ่ม | **S** — `GameRoom.ts`, `main.ts`, `types.ts` | เสร็จแล้ว |
 | 4 | TICK message ไม่มี delta compression (§5.6) | เริ่มจาก quick win ก่อน full delta system: ตัด field ที่ไม่เปลี่ยนบ่อย (เช่น player name/class) ออกจาก payload รายทิก ส่งแค่ตอนเปลี่ยนจริง; ระยะยาวค่อยทำ delta/interest-management (ส่งเฉพาะ entity ในระยะ viewport ของแต่ละผู้เล่น) | **L** (ระยะยาว) / **S** (quick win เบื้องต้น) | ไม่ต้องรอ risk อื่น แต่ควรวัด (profiling) ก่อนว่า payload จริงใหญ่แค่ไหนที่ wave ท้ายๆ ก่อนลงทุนแก้ใหญ่ |
+| 19 | ✅ **แก้แล้ว 2026-09-11 (พบใหม่ นอกเหนือ 18 ข้อเดิม)** — ~~กระสุนถูกวาดใต้ฝูงมอนสเตอร์ (client z-order bug)~~ (§3.7) | พบจาก user report "ตายไม่รู้สาเหตุตอนลาสบอสด่าน 2" — `main.ts` วาด `vfx.render()` (กระสุนทุกชนิด) ก่อน `hordeRenderer.render()` เสมอ กระสุนที่วิ่งผ่าน/เกิดใกล้ฝูงมอน (380+ ตัวช่วงเวฟท้าย) ถูกวาดทับจนมองไม่เห็น หนักสุดที่ LORD_OF_TORMENT (Void Barrage 5 ลูก + Summon Reinforcements ล้อมตัวเอง) แก้โดยแยก `VFX2D.render()` เป็น `renderGround()`/`renderOverlay()` แล้วย้ายกระสุน+particle ไปวาดหลังฝูงมอน | **S** — `VFX2D.ts`, `main.ts` | เสร็จแล้ว |
+| 20 | ✅ **แก้แล้ว 2026-09-11 (พบใหม่ นอกเหนือ 19 ข้อเดิม)** — ~~IMP hitbox เล็กกว่า sprite ที่วาดมาก~~ (§3.7) | พบจาก user report "ธนู archer โดนตัวค้างคาวแต่ไม่โดน dmg เลย" — `MONSTER_STATS[IMP].radius` เดิม 12 เล็กที่สุดในเกม ขณะ sprite วาดคงที่ 64×64px ไม่ผูกกับ radius เลย รวมกับ arrow radius 10 ได้ combined hit เพียง 22px ปรับเป็น 16 (เท่า SKELETON) | **S** — `constants.ts` (ค่าเดียว, ไหลผ่าน `ServerMonster.radius` อัตโนมัติ) | เสร็จแล้ว |
 
 ### Phase 2 — แก้ก่อนขยายฟีเจอร์ใหญ่ (โดยเฉพาะก่อนเพิ่ม skill tree/trait ใหม่จำนวนมาก)
 

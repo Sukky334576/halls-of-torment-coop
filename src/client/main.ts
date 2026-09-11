@@ -850,10 +850,15 @@ class GameApp {
       this.renderer.beginScene();
 
       // 1. Pickups & Ground VFX
-      this.vfx.render(this.renderer.ctx, now);
+      this.vfx.renderGround(this.renderer.ctx, now);
 
       // 2. Monster Horde (Y-sorted)
       this.hordeRenderer.render(this.latestTick.monsters, now);
+
+      // 2.5 Projectiles & Hit Sparks — drawn AFTER the horde so they render in front of
+      // monster sprites instead of getting visually buried inside a dense pack (see
+      // VFX2D.renderOverlay's doc comment).
+      this.vfx.renderOverlay(this.renderer.ctx, now);
 
       // 3. Heroes with Class-Specific Visuals & Status
       this.playerSprites.render(this.renderer.ctx, this.latestTick.players, this.myId);

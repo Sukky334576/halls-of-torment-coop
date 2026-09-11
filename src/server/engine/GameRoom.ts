@@ -2216,27 +2216,38 @@ export class GameRoom {
     monster.bossSummonTimer += dt;
 
     if (monster.type === MonsterType.ELITE_GOLEM) {
-      // Ground Slam: a telegraph-free but fair AOE (7s cooldown is long enough to react to
-      // the visual/audio cue once it lands) — punishes standing still in melee range.
+      // Ground Slam: a 0.4s telegraphed AOE (7s cooldown between casts) — punishes standing
+      // still in melee range, but gives a genuine warning window to back out of first. Used to
+      // be instant/telegraph-free (damage applied the same tick the cast started, with only a
+      // 0.45s POST-impact visual) — a modified client or a monster horde occluding the impact
+      // ring (see docs/archive/2026-09-11-projectile-zorder-fix.md) made it read as "damage
+      // with no visible cause". Two-phase now: TITAN_QUAKE_TELEGRAPH (warning ring, no damage)
+      // for slamTelegraphTimer's duration, then the real hit + TITAN_QUAKE_WAVE impact visual.
       const SLAM_COOLDOWN = 7;
       const SLAM_RADIUS = 180;
-      if (monster.bossAbilityTimer >= SLAM_COOLDOWN) {
-        const inRange = alivePlayers.some((p) => Math.hypot(p.x - monster.x, p.y - monster.y) <= 260);
-        if (inRange) {
-          monster.bossAbilityTimer = 0;
+      const SLAM_TELEGRAPH_DURATION = 0.4;
+
+      if (monster.slamTelegraphTimer > 0) {
+        monster.slamTelegraphTimer -= dt;
+        if (monster.slamTelegraphTimer <= 0) {
+          monster.slamTelegraphTimer = 0;
+          // Epicenter is frozen at cast time (slamTelegraphX/Y), not the golem's current
+          // position — it keeps chasing during the wind-up like normal, but the slam itself
+          // lands where it was cast so a player who moves off the warning ring during the 0.4s
+          // actually escapes it, instead of the hit just following them.
           for (const p of alivePlayers) {
-            if (Math.hypot(p.x - monster.x, p.y - monster.y) <= SLAM_RADIUS) {
+            if (Math.hypot(p.x - monster.slamTelegraphX, p.y - monster.slamTelegraphY) <= SLAM_RADIUS) {
               p.takeDamage(monster.damage * 2.5);
             }
           }
-          // Reuses the Cat Tank ultimate's shockwave visual — same "stone/earth impact" read,
-          // no new client rendering needed. damage: 0 since it's purely cosmetic here; the
-          // actual hits above are resolved directly against alivePlayers.
+          // Reuses the Cat Tank ultimate's shockwave visual — same "stone/earth impact" read.
+          // damage: 0 since it's purely cosmetic here; the actual hits above are resolved
+          // directly against alivePlayers.
           this.projectiles.push({
             id: ++this.nextProjId,
             type: ProjectileType.TITAN_QUAKE_WAVE,
-            x: monster.x,
-            y: monster.y,
+            x: monster.slamTelegraphX,
+            y: monster.slamTelegraphY,
             vx: 0,
             vy: 0,
             damage: 0,
@@ -2246,7 +2257,30 @@ export class GameRoom {
             pierceRemaining: 1,
             hitEntityIds: new Set()
           });
-          this.broadcastDamageNumber(monster.x, monster.y - 30, 0, false, '💥 GROUND SLAM!', '#a8a29e');
+          this.broadcastDamageNumber(monster.slamTelegraphX, monster.slamTelegraphY - 30, 0, false, '💥 GROUND SLAM!', '#a8a29e');
+        }
+      } else if (monster.bossAbilityTimer >= SLAM_COOLDOWN) {
+        const inRange = alivePlayers.some((p) => Math.hypot(p.x - monster.x, p.y - monster.y) <= 260);
+        if (inRange) {
+          monster.bossAbilityTimer = 0;
+          monster.slamTelegraphTimer = SLAM_TELEGRAPH_DURATION;
+          monster.slamTelegraphX = monster.x;
+          monster.slamTelegraphY = monster.y;
+          this.projectiles.push({
+            id: ++this.nextProjId,
+            type: ProjectileType.TITAN_QUAKE_TELEGRAPH,
+            x: monster.x,
+            y: monster.y,
+            vx: 0,
+            vy: 0,
+            damage: 0,
+            isCrit: false,
+            radius: SLAM_RADIUS,
+            lifeTime: SLAM_TELEGRAPH_DURATION,
+            pierceRemaining: 1,
+            hitEntityIds: new Set()
+          });
+          this.broadcastDamageNumber(monster.x, monster.y - 30, 0, false, '⚠️ GROUND SLAM INCOMING!', '#fbbf24');
         }
       }
 

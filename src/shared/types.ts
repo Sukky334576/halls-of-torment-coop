@@ -83,7 +83,10 @@ export enum ProjectileType {
   GAMBLER_CARD = 33,
   LUCKY_DICE = 34,
   SLOT_COIN_RAIN = 35,
-  MAGNET_PULL_SPARK = 36
+  MAGNET_PULL_SPARK = 36,
+  // Elite Golem's Ground Slam wind-up warning ring (non-damaging) — shown for the telegraph
+  // duration before the real TITAN_QUAKE_WAVE impact lands. See GameRoom.updateBossAbilities().
+  TITAN_QUAKE_TELEGRAPH = 37
 }
 
 export enum ShrineType {
