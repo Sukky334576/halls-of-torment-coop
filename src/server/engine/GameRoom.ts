@@ -62,6 +62,10 @@ export class GameRoom {
   public isStarted: boolean = false;
   public isOver: boolean = false;
   public isPaused: boolean = false;
+  // True right after clearing wave 30 (Lord of Torment) for the first time — the world freezes
+  // (see tick()) while the party decides whether to hit Continue (handleContinueRun) and push
+  // into endless waves, or return to the hub from the already-sent victory GAME_OVER.
+  public victoryPending: boolean = false;
 
   private players: Map<string, ServerPlayer> = new Map();
   private sendCallback: (playerId: string, msg: ServerMessage) => void;
@@ -445,6 +449,14 @@ export class GameRoom {
       return;
     }
 
+    // 0.5. Victory screen up after clearing wave 30, waiting on the party to pick Continue —
+    // freeze the world exactly like the pause above so nothing keeps fighting/dying underneath
+    // the modal. Cleared by handleContinueRun().
+    if (this.victoryPending) {
+      this.broadcastTick();
+      return;
+    }
+
     const dt = GAME_CONSTANTS.SERVER_TICK_MS / 1000;
     this.tickCount++;
 
@@ -470,26 +482,52 @@ export class GameRoom {
       }
     }
 
-    for (const player of this.players.values()) {
-      if (player.isDead) {
-        // Dead player: check if alive teammates are in revive circle
-        let revivingTeammates = 0;
-        for (const aliveP of alivePlayers) {
-          const dist = Math.hypot(aliveP.x - player.x, aliveP.y - player.y);
-          if (dist <= GAME_CONSTANTS.REVIVE_ZONE_RADIUS) {
-            revivingTeammates++;
-          }
-        }
+    // Contention-based revive: if multiple downed teammates are stacked within the SAME alive
+    // player's revive radius, that alive player's contribution goes to only ONE of them per
+    // tick — whichever already has the most progress — instead of splitting attention and
+    // reviving both in lockstep forever. Reviving one teammate fully before starting the next
+    // reads as intentional, and means a second alive player still starts a second revive
+    // immediately if there's enough manpower for both.
+    const deadPlayers = Array.from(this.players.values()).filter((p) => p.isDead);
+    const reviverCounts = new Map<string, number>(); // dead player id -> alive players actively reviving them this tick
 
-        if (revivingTeammates > 0) {
-          player.reviveTimer += dt * revivingTeammates;
-          if (player.reviveTimer >= GAME_CONSTANTS.REVIVE_TIME_SECONDS) {
-            player.revive();
-            this.broadcastDamageNumber(player.x, player.y, 100, false); // Green heal/revive indicator
-          }
-        } else {
-          player.reviveTimer = Math.max(0, player.reviveTimer - dt * 0.5);
+    for (const aliveP of alivePlayers) {
+      const inRange = deadPlayers.filter(
+        (deadP) => Math.hypot(aliveP.x - deadP.x, aliveP.y - deadP.y) <= GAME_CONSTANTS.REVIVE_ZONE_RADIUS
+      );
+      if (inRange.length === 0) continue;
+
+      // Prefer a downed teammate nobody else is reviving yet THIS tick — so two helpers near
+      // two genuinely different stacked bodies naturally split up and revive both at once.
+      // Only pile onto an already-claimed target when every in-range option is already taken
+      // (i.e. more revivers than distinct bodies), reinforcing whichever has the most progress
+      // so the leader finishes before the next one starts.
+      const unclaimed = inRange.filter((deadP) => !reviverCounts.has(deadP.id));
+      const pool = unclaimed.length > 0 ? unclaimed : inRange;
+
+      let target = pool[0];
+      let bestDist = Math.hypot(aliveP.x - target.x, aliveP.y - target.y);
+      for (let i = 1; i < pool.length; i++) {
+        const cand = pool[i];
+        const dist = Math.hypot(aliveP.x - cand.x, aliveP.y - cand.y);
+        if (cand.reviveTimer > target.reviveTimer || (cand.reviveTimer === target.reviveTimer && dist < bestDist)) {
+          target = cand;
+          bestDist = dist;
         }
+      }
+      reviverCounts.set(target.id, (reviverCounts.get(target.id) || 0) + 1);
+    }
+
+    for (const player of deadPlayers) {
+      const revivingTeammates = reviverCounts.get(player.id) || 0;
+      if (revivingTeammates > 0) {
+        player.reviveTimer += dt * revivingTeammates;
+        if (player.reviveTimer >= GAME_CONSTANTS.REVIVE_TIME_SECONDS) {
+          player.revive();
+          this.broadcastDamageNumber(player.x, player.y, 100, false); // Green heal/revive indicator
+        }
+      } else {
+        player.reviveTimer = Math.max(0, player.reviveTimer - dt * 0.5);
       }
     }
 
@@ -2186,6 +2224,43 @@ export class GameRoom {
           this.broadcastDamageNumber(monster.x, monster.y - 30, 0, false, '💥 GROUND SLAM!', '#a8a29e');
         }
       }
+
+      // Boulder Toss: this boss used to be a pure melee chaser at any distance — kiting it
+      // indefinitely was a free, riskless strategy. Reuses bossSummonTimer as a second,
+      // independent cooldown slot (this boss has no summon of its own) so it fires on its own
+      // schedule, not tied to Ground Slam's.
+      const BOULDER_COOLDOWN = 5;
+      const BOULDER_RANGE = 650;
+      if (monster.bossSummonTimer >= BOULDER_COOLDOWN) {
+        let nearestGolemTarget: ServerPlayer | null = null;
+        let nearestGolemDist = Infinity;
+        for (const p of alivePlayers) {
+          const d = Math.hypot(p.x - monster.x, p.y - monster.y);
+          if (d < nearestGolemDist) {
+            nearestGolemDist = d;
+            nearestGolemTarget = p;
+          }
+        }
+        // Only outside melee range — Ground Slam already covers anyone standing close.
+        if (nearestGolemTarget && nearestGolemDist > 260 && nearestGolemDist <= BOULDER_RANGE) {
+          monster.bossSummonTimer = 0;
+          const angle = Math.atan2(nearestGolemTarget.y - monster.y, nearestGolemTarget.x - monster.x);
+          this.projectiles.push({
+            id: ++this.nextProjId,
+            type: ProjectileType.ENEMY_ARROW,
+            x: monster.x,
+            y: monster.y,
+            vx: Math.cos(angle) * 220,
+            vy: Math.sin(angle) * 220,
+            damage: Math.round(monster.damage * 1.4),
+            isCrit: false,
+            radius: 12,
+            lifeTime: 2.5,
+            pierceRemaining: 1,
+            hitEntityIds: new Set()
+          });
+        }
+      }
     } else if (monster.type === MonsterType.LORD_OF_TORMENT) {
       // Void Barrage: a 5-projectile fan aimed at the nearest player — the only ranged threat
       // in the fight otherwise, since this boss is a melee chaser like every other type.
@@ -2247,6 +2322,39 @@ export class GameRoom {
           this.monsterGrid.insert(summon);
         }
         this.broadcastDamageNumber(monster.x, monster.y - 50, 0, false, '💀 REINFORCEMENTS!', '#dc2626');
+      }
+    } else if (monster.type === MonsterType.HELLHOUND) {
+      // Hellfire Spit: the wave-10 boss was a pure fast melee chaser with zero ranged option —
+      // its raw speed (210, faster than every player) already made it hard to outrun in melee,
+      // but a player who DID find an angle to kite around obstacles paid no price for it at all.
+      const SPIT_COOLDOWN = 4.5;
+      const SPIT_RANGE = 500;
+      let nearestHoundTarget: ServerPlayer | null = null;
+      let nearestHoundDist = Infinity;
+      for (const p of alivePlayers) {
+        const d = Math.hypot(p.x - monster.x, p.y - monster.y);
+        if (d < nearestHoundDist) {
+          nearestHoundDist = d;
+          nearestHoundTarget = p;
+        }
+      }
+      if (monster.bossAbilityTimer >= SPIT_COOLDOWN && nearestHoundTarget && nearestHoundDist > 150 && nearestHoundDist <= SPIT_RANGE) {
+        monster.bossAbilityTimer = 0;
+        const angle = Math.atan2(nearestHoundTarget.y - monster.y, nearestHoundTarget.x - monster.x);
+        this.projectiles.push({
+          id: ++this.nextProjId,
+          type: ProjectileType.ENEMY_FIREBALL,
+          x: monster.x,
+          y: monster.y,
+          vx: Math.cos(angle) * 260,
+          vy: Math.sin(angle) * 260,
+          damage: Math.round(monster.damage * 1.2),
+          isCrit: false,
+          radius: 10,
+          lifeTime: 2.0,
+          pierceRemaining: 1,
+          hitEntityIds: new Set()
+        });
       }
     }
   }
@@ -2475,10 +2583,13 @@ export class GameRoom {
           });
         }
 
-        // Check Ultimate Final Boss Defeat
-        if (monster.type === MonsterType.LORD_OF_TORMENT) {
-          this.isOver = true;
-          this.broadcastGameOver(true, this.stageId);
+        // Check Ultimate Final Boss Defeat — only the FIRST clear shows a victory screen.
+        // Once the party has opted into endless mode (see handleContinueRun), the Lord of
+        // Torment just keeps reappearing every 5 waves like any other boss checkpoint
+        // (HordeDirector.createBossSpawn) — killing it again shouldn't interrupt the run.
+        if (monster.type === MonsterType.LORD_OF_TORMENT && !this.hordeDirector.isEndlessMode()) {
+          this.victoryPending = true;
+          this.broadcastGameOver(true, this.stageId, undefined, true);
         }
       }
     }
@@ -3049,6 +3160,7 @@ export class GameRoom {
       isPaused: this.isPaused,
       currentWave: this.hordeDirector.getCurrentWave(),
       maxWaves: HordeDirector.MAX_WAVES,
+      isEndless: this.hordeDirector.isEndlessMode(),
       waveTimeRemaining: Math.round(this.hordeDirector.getWaveTimeRemaining()),
       isBossWave: this.hordeDirector.isBossWave(),
       bossName: this.hordeDirector.getBossName(),
@@ -3120,7 +3232,7 @@ export class GameRoom {
 
   // Gold is personal now, so GAME_OVER can't be a single shared broadcast payload —
   // each player needs their own `personalGold` baked into their copy of the message.
-  private sendGameOverTo(player: ServerPlayer, victory: boolean, clearedStageId?: number, reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER'): void {
+  private sendGameOverTo(player: ServerPlayer, victory: boolean, clearedStageId?: number, reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER', canContinue?: boolean): void {
     this.sendCallback(player.id, {
       type: 'GAME_OVER',
       victory,
@@ -3130,13 +3242,32 @@ export class GameRoom {
       personalGold: player.gold,
       playerCount: this.players.size,
       clearedStageId,
-      reason
+      reason,
+      canContinue
     });
   }
 
-  private broadcastGameOver(victory: boolean, clearedStageId?: number, reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER'): void {
+  private broadcastGameOver(victory: boolean, clearedStageId?: number, reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER', canContinue?: boolean): void {
     for (const player of this.players.values()) {
-      this.sendGameOverTo(player, victory, clearedStageId, reason);
+      this.sendGameOverTo(player, victory, clearedStageId, reason, canContinue);
+    }
+  }
+
+  /** Player hit "Continue" on the post-wave-30 victory screen — un-freeze the world and push
+   * HordeDirector into endless mode (waves keep advancing past 30, boss cycles every 5).
+   *
+   * Resets totalKills and every player's gold to 0: the client already banked both (coins to
+   * MetaProgression, kills into trial-quest stats) from the interrupting GAME_OVER message,
+   * and both fields are cumulative for the room's whole lifetime — without this reset, the
+   * eventual real GAME_OVER when the run actually ends would report the FULL match total again,
+   * double-counting everything already-banked from before the continue. */
+  public handleContinueRun(): void {
+    if (!this.victoryPending) return;
+    this.victoryPending = false;
+    this.hordeDirector.enableEndlessMode();
+    this.totalKills = 0;
+    for (const player of this.players.values()) {
+      player.gold = 0;
     }
   }
 }

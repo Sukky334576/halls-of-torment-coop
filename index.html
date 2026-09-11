@@ -975,11 +975,27 @@
       pointer-events: none;
     }
 
-    .hud-top-bar {
+    /* Wraps the top stat bar AND the banner stack below it in ONE flex column so the two space
+       themselves based on actual rendered height, instead of each guessing a fixed top-offset
+       for the other (`.hud-top-bar` at a hardcoded 16px, `.hud-banner-stack` at a hardcoded
+       66px assuming the bar above it was ~50px tall) — the same category of bug the
+       `.hud-banner-stack` comment below already describes fixing among ITS OWN children, still
+       present between these two siblings until now: a taller stat row (e.g. from an emoji
+       rendering large in one browser) pushed the boss banner into visibly overlapping it. */
+    .hud-header-stack {
       position: absolute;
       top: 16px;
       left: 50%;
       transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      z-index: 15;
+      pointer-events: none;
+    }
+
+    .hud-top-bar {
       display: flex;
       gap: 24px;
       background: rgba(10, 13, 20, 0.9);
@@ -1039,16 +1055,10 @@
        `.hud-boss-banner` also used to be defined twice in this file (here and further below)
        with different `top`/`z-index` — only the later one ever took effect; consolidated. */
     .hud-banner-stack {
-      position: absolute;
-      top: 66px;
-      left: 50%;
-      transform: translateX(-50%);
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 8px;
-      z-index: 15;
-      pointer-events: none;
     }
 
     .boss-banner-label {
@@ -2837,6 +2847,23 @@
       color: #ffffff;
       letter-spacing: 2px;
       text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+    }
+    /* Dedicated Souls-style boss HP bar under the name — distinct from the small floating
+       bar over the boss's own sprite, always visible even if the boss is off-screen. */
+    .boss-hpbar-track {
+      width: 320px;
+      max-width: 60vw;
+      height: 10px;
+      margin: 8px auto 0;
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .boss-hpbar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #dc2626 0%, #ef4444 60%, #f87171 100%);
+      transition: width 0.25s ease-out;
     }
 
     /* --- STAGE SELECTION PORTAL MODAL --- */

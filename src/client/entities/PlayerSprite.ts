@@ -162,7 +162,8 @@ export class PlayerSpriteManager {
         ctx.fillStyle = coreGrad;
         ctx.fillRect(-8, -480, 16, 480);
 
-        // B. Pulsing ground revive circle
+        // B. Pulsing ground revive circle — ambient "needs help" indicator, always the same
+        // regardless of progress (that's what the inner ring below is for).
         const revivePulse = 1.0 + Math.sin(nowSec * 5) * 0.2;
         ctx.strokeStyle = '#ef4444';
         ctx.shadowColor = '#dc2626';
@@ -175,13 +176,36 @@ export class PlayerSpriteManager {
         ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
         ctx.fill();
 
-        // Inner golden revive ring
-        ctx.strokeStyle = '#fde047';
-        ctx.lineWidth = 2;
+        // Inner revive PROGRESS ring — fills clockwise from 12 o'clock as a teammate revives
+        // this player, so it's obvious at a glance whether reviving is actually happening and
+        // how close it is to done (previously drew as a fixed ring regardless of real progress,
+        // identical whether revive was at 0% or 90%).
+        const reviveProgress = p.reviveProgress ?? 0;
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'rgba(253, 224, 71, 0.25)';
+        ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.arc(0, 0, 26, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.shadowBlur = 0;
+
+        if (reviveProgress > 0) {
+          ctx.strokeStyle = '#fde047';
+          ctx.shadowColor = '#facc15';
+          ctx.shadowBlur = 10;
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(0, 0, 26, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * reviveProgress);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+
+          ctx.font = 'bold 13px "Cinzel", sans-serif';
+          ctx.fillStyle = '#fde047';
+          ctx.textAlign = 'center';
+          ctx.shadowColor = '#000';
+          ctx.shadowBlur = 4;
+          ctx.fillText(`${Math.round(reviveProgress * 100)}%`, 0, 5);
+          ctx.shadowBlur = 0;
+        }
 
         // Floating spirit wisp / skull above
         const bob = Math.sin(nowSec * 4) * 6;
