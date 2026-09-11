@@ -222,7 +222,9 @@ export class HordeDirector {
       }
     } else if (wave === 10) {
       type = MonsterType.HELLHOUND;
-      bossHpMultiplier = 8.5; // Nerfed from 14.0
+      // Nerfed from 14.0, then re-buffed to 12.0 (2026-09-11) now that it has an actual ability
+      // (Hellfire Spit, see updateBossAbilities) instead of being a pure fast melee chaser.
+      bossHpMultiplier = 12.0;
     } else if (wave === 15) {
       type = this.stageId === 2 ? MonsterType.MAGMA_IMP : this.stageId === 3 ? MonsterType.VOID_WARLOCK : MonsterType.ELITE_GOLEM;
       bossHpMultiplier = 12.0; // Nerfed from 18.0

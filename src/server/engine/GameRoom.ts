@@ -2323,6 +2323,39 @@ export class GameRoom {
         }
         this.broadcastDamageNumber(monster.x, monster.y - 50, 0, false, '💀 REINFORCEMENTS!', '#dc2626');
       }
+    } else if (monster.type === MonsterType.HELLHOUND) {
+      // Hellfire Spit: the wave-10 boss was a pure fast melee chaser with zero ranged option —
+      // its raw speed (210, faster than every player) already made it hard to outrun in melee,
+      // but a player who DID find an angle to kite around obstacles paid no price for it at all.
+      const SPIT_COOLDOWN = 4.5;
+      const SPIT_RANGE = 500;
+      let nearestHoundTarget: ServerPlayer | null = null;
+      let nearestHoundDist = Infinity;
+      for (const p of alivePlayers) {
+        const d = Math.hypot(p.x - monster.x, p.y - monster.y);
+        if (d < nearestHoundDist) {
+          nearestHoundDist = d;
+          nearestHoundTarget = p;
+        }
+      }
+      if (monster.bossAbilityTimer >= SPIT_COOLDOWN && nearestHoundTarget && nearestHoundDist > 150 && nearestHoundDist <= SPIT_RANGE) {
+        monster.bossAbilityTimer = 0;
+        const angle = Math.atan2(nearestHoundTarget.y - monster.y, nearestHoundTarget.x - monster.x);
+        this.projectiles.push({
+          id: ++this.nextProjId,
+          type: ProjectileType.ENEMY_FIREBALL,
+          x: monster.x,
+          y: monster.y,
+          vx: Math.cos(angle) * 260,
+          vy: Math.sin(angle) * 260,
+          damage: Math.round(monster.damage * 1.2),
+          isCrit: false,
+          radius: 10,
+          lifeTime: 2.0,
+          pierceRemaining: 1,
+          hitEntityIds: new Set()
+        });
+      }
     }
   }
 
