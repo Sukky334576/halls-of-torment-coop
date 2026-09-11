@@ -323,6 +323,7 @@ export interface PickupNetworkData {
   x: number;
   y: number;
   value: number;
+  gearId?: string; // WELL_GEAR only — which GEAR_CATALOG item this pickup is
   duration?: number;
   maxDuration?: number;
 }
@@ -431,7 +432,7 @@ export type ServerMessage =
       potionLocks: number;
       lockedTraitId?: string | null;
     }
-  | { type: 'WELL_GEAR_RETRIEVED'; gearName: string; retrievedBy: string }
+  | { type: 'WELL_GEAR_RETRIEVED'; gearId: string; gearName: string; retrievedBy: string }
   | { type: 'ROOM_LIST'; rooms: RoomSummary[] }
   | { type: 'GRANT_GOLD'; amount: number; message: string; thaiMessage: string; grantId?: string }
   | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number; reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER' };

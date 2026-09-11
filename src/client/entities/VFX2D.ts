@@ -7,6 +7,7 @@ import {
   ShrineType,
   PlayerClass
 } from '../../shared/types';
+import { getGearItem } from '../../shared/gearData';
 
 interface Particle {
   x: number;
@@ -280,6 +281,40 @@ export class VFX2D {
           ctx.beginPath();
           ctx.ellipse(0, 0, 6 * spin, 6, 0, 0, Math.PI * 2);
           ctx.fill();
+          break;
+        }
+
+        case PickupType.WELL_GEAR: {
+          // Found gear: a rarity-colored glowing halo behind the item's own icon, plus the
+          // same countdown ring Treasure Chest uses since it also expires if uncollected.
+          const gear = item.gearId ? getGearItem(item.gearId) : undefined;
+          const rarityColor = gear?.rarity === 'unique' ? '#f59e0b' : gear?.rarity === 'rare' ? '#3b82f6' : '#9ca3af';
+          const baseAlpha = ctx.globalAlpha;
+
+          const pulse = 1.0 + Math.sin(time * 4 + item.id) * 0.1;
+          ctx.shadowColor = rarityColor;
+          ctx.shadowBlur = 16;
+          ctx.globalAlpha = baseAlpha * 0.3;
+          ctx.fillStyle = rarityColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, 13 * pulse, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = baseAlpha;
+
+          ctx.shadowBlur = 6;
+          ctx.font = '16px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(gear?.icon || '❔', 0, 0);
+
+          if (item.duration !== undefined && item.maxDuration) {
+            const pct = Math.max(0, item.duration / item.maxDuration);
+            ctx.strokeStyle = pct < 0.25 ? '#ef4444' : rarityColor;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 14, 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * pct);
+            ctx.stroke();
+          }
           break;
         }
 

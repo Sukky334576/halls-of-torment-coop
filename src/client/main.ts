@@ -575,6 +575,14 @@ class GameApp {
             break;
           }
 
+          case 'WELL_GEAR_RETRIEVED': {
+            // Only the collector's own client gets this message (see GameRoom's
+            // handlePickupCollection) — teammates just see the floating callout text via the
+            // normal damage-number broadcast, nothing to bank on their end.
+            MetaProgression.addGearToVault(msg.gearId);
+            break;
+          }
+
           case 'GAME_OVER': {
             this.isGameRunning = false;
             this.isPaused = false;

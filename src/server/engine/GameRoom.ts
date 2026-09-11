@@ -21,6 +21,7 @@ import { ServerMonster, ElementStatus } from '../entities/ServerMonster';
 import { SpatialGrid } from './SpatialGrid';
 import { HordeDirector } from './HordeDirector';
 import { STAGES, generateStageProps } from '../../shared/stages';
+import { GearItem, GearRarity, getGearItem, getRandomGearOfRarity } from '../../shared/gearData';
 
 // Comfortably larger than maxHp is reachable by any build — used only by the final-boss
 // execute deadline (see HordeDirector.isDeadlineExpired) to guarantee death via
@@ -51,6 +52,7 @@ interface Pickup {
   y: number;
   value: number;
   radius: number;
+  gearId?: string; // WELL_GEAR only — which GEAR_CATALOG item this pickup is
   duration?: number;
   maxDuration?: number;
 }
@@ -2391,6 +2393,25 @@ export class GameRoom {
         });
       }
 
+      // Chance to drop a piece of Gear (bosses always drop one instead — see the boss reward
+      // block below). Weighted toward common, unique is intentionally rare from a regular kill.
+      if (!monster.isBoss && Math.random() < GAME_CONSTANTS.GEAR_DROP_CHANCE) {
+        const gear = this.rollGearDrop(false);
+        if (gear) {
+          this.pickups.push({
+            id: ++this.nextPickupId,
+            type: PickupType.WELL_GEAR,
+            x: Math.max(-mapLimit, Math.min(mapLimit, dropX + (Math.random() * 20 - 10))),
+            y: Math.max(-mapLimit, Math.min(mapLimit, dropY + (Math.random() * 20 - 10))),
+            value: 0,
+            radius: 16,
+            gearId: gear.id,
+            duration: 60.0,
+            maxDuration: 60.0
+          });
+        }
+      }
+
       // Chance to drop a Magnet: instantly vacuums every EXP gem & gold coin on the map to the team.
       // Times out like the other world drops (Treasure Chest / Health Potion, see
       // updateTimedWorldSpawns) instead of sitting on the map forever — the swarm keeps moving
@@ -2435,6 +2456,24 @@ export class GameRoom {
           value: 1,
           radius: 20
         });
+
+        // Guaranteed Gear Drop: every boss always drops one piece of gear, weighted toward
+        // higher rarity than a normal kill's roll (see rollGearDrop) — equipment should feel
+        // earned from a real fight, never handed out by an account-wide achievement.
+        const bossGear = this.rollGearDrop(true);
+        if (bossGear) {
+          this.pickups.push({
+            id: ++this.nextPickupId,
+            type: PickupType.WELL_GEAR,
+            x: Math.max(-mapLimit, Math.min(mapLimit, dropX + (Math.random() * 40 - 20))),
+            y: Math.max(-mapLimit, Math.min(mapLimit, dropY + (Math.random() * 40 - 20))),
+            value: 0,
+            radius: 16,
+            gearId: bossGear.id,
+            duration: 60.0,
+            maxDuration: 60.0
+          });
+        }
 
         // Check Ultimate Final Boss Defeat
         if (monster.type === MonsterType.LORD_OF_TORMENT) {
@@ -2587,6 +2626,22 @@ export class GameRoom {
     this.triggerLevelUpChoices(player);
   }
 
+  /** Rolls which rarity tier a gear drop should be, then picks a random item of that tier.
+   * Bosses skew noticeably toward rare/unique compared to a normal kill, but never guaranteed
+   * to be unique — that stays a meaningfully rare outcome even from a boss. */
+  private rollGearDrop(isBoss: boolean): GearItem | undefined {
+    const weights: [GearRarity, number][] = isBoss
+      ? [['common', 30], ['rare', 45], ['unique', 25]]
+      : [['common', 70], ['rare', 25], ['unique', 5]];
+    const total = weights.reduce((sum, [, w]) => sum + w, 0);
+    let roll = Math.random() * total;
+    for (const [rarity, w] of weights) {
+      roll -= w;
+      if (roll <= 0) return getRandomGearOfRarity(rarity);
+    }
+    return getRandomGearOfRarity(weights[weights.length - 1][0]);
+  }
+
   private handlePickupCollection(pickup: Pickup, collector: ServerPlayer): void {
     if (pickup.type === PickupType.MAGNET) {
       // Actual effect (sweeping EXP/gold map-wide) is handled by collectMagnetPulse()
@@ -2597,6 +2652,23 @@ export class GameRoom {
     if (pickup.type === PickupType.GOLD_COIN) {
       // Personal — whoever walks over a coin keeps it, instead of it going into a shared pot.
       collector.gold += pickup.value;
+      return;
+    }
+
+    if (pickup.type === PickupType.WELL_GEAR) {
+      const gear = pickup.gearId ? getGearItem(pickup.gearId) : undefined;
+      if (gear) {
+        // Personal — only the collector's own client banks it to their vault (see main.ts's
+        // WELL_GEAR_RETRIEVED handler). Teammates just see the callout below, nothing granted.
+        this.sendCallback(collector.id, {
+          type: 'WELL_GEAR_RETRIEVED',
+          gearId: gear.id,
+          gearName: gear.name,
+          retrievedBy: collector.name
+        });
+        const rarityColor = gear.rarity === 'unique' ? '#f59e0b' : gear.rarity === 'rare' ? '#3b82f6' : '#9ca3af';
+        this.broadcastDamageNumber(collector.x, collector.y - 40, 0, true, `${gear.icon} ${collector.name} found ${gear.name}!`, rarityColor);
+      }
       return;
     }
 
@@ -3011,6 +3083,7 @@ export class GameRoom {
         x: Math.round(p.x),
         y: Math.round(p.y),
         value: p.value,
+        gearId: p.gearId,
         duration: p.duration,
         maxDuration: p.maxDuration
       })),

@@ -16,6 +16,9 @@ export const GAME_CONSTANTS = {
   // for them to reconnect (browser refresh, dropped WebSocket) before being removed for real.
   RECONNECT_GRACE_MS: 60_000,
   GOLD_DROP_CHANCE: 0.022, // 2.2% chance per kill — drops 1 gold coin, scaled by stage.goldMultiplier / Gold Rush Shrine
+  // Gear must only ever come from monster kills, never from an achievement (see trialQuests.ts)
+  // — bosses always drop one instead of rolling this (see damageMonster's boss-reward block).
+  GEAR_DROP_CHANCE: 0.015, // 1.5% chance per kill for a normal monster to drop a piece of gear
   MAGNET_DROP_CHANCE: 0.0075, // 0.75% chance per kill (halved from 1.5%, still felt too common) — pulls every EXP gem & gold coin on the map to the team when collected
   // Surrendering is a deliberate choice to bail, not a consequence of difficulty like dying
   // or timing out — those still pay out 100% of collected gold. Keep this in sync with the

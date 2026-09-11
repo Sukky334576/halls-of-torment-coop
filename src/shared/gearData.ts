@@ -239,3 +239,11 @@ export const GEAR_CATALOG: Record<string, GearItem> = {
 export function getGearItem(id: string): GearItem | undefined {
   return GEAR_CATALOG[id];
 }
+
+/** Picks a uniformly random item within one rarity tier — used by GameRoom's monster-kill
+ * gear drop roll to turn a chosen rarity into an actual item. */
+export function getRandomGearOfRarity(rarity: GearRarity): GearItem | undefined {
+  const pool = Object.values(GEAR_CATALOG).filter((g) => g.rarity === rarity);
+  if (pool.length === 0) return undefined;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
