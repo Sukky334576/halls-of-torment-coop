@@ -43,50 +43,57 @@ export class HUD {
     hudWrapper.id = 'hud-layer';
     hudWrapper.className = 'hud-layer';
     hudWrapper.innerHTML = `
-      <!-- Top Center Bar -->
-      <div class="hud-top-bar">
-        <div class="hud-stat-box wave-box">
-          <span class="icon">⚔️</span>
-          <span id="hud-wave">WAVE 1/30</span>
-        </div>
-        <div class="hud-stat-box timer-box">
-          <span class="icon">⏳</span>
-          <span id="hud-timer">00:00</span>
-        </div>
-        <div class="hud-stat-box kill-box">
-          <span class="icon">💀</span>
-          <span id="hud-kills">0</span>
-        </div>
-        <div class="hud-stat-box gold-box">
-          <span class="icon">💰</span>
-          <span id="hud-gold">0</span>
-        </div>
-      </div>
-
-      <!-- Wraps the three banners below in a flex column so they space themselves based on
-           actual rendered height instead of each guessing its own fixed top-offset (that's
-           what let a long boss name push the deadline countdown into overlapping it). -->
-      <div class="hud-banner-stack">
-        <!-- Active Shrine Buff Banner -->
-        <div id="hud-shrine-buff" class="hud-shrine-buff" style="display: none;">
-          <span id="shrine-buff-icon" class="shrine-buff-icon">⚡</span>
-          <span id="shrine-buff-name" class="shrine-buff-name">SHRINE OF SPEED</span>
-          <span id="shrine-buff-timer" class="shrine-buff-timer">10.0s</span>
-        </div>
-
-        <!-- Boss Announcement Banner -->
-        <div id="hud-boss-banner" class="hud-boss-banner" style="display: none;">
-          <div class="boss-banner-label" id="hud-boss-banner-label">${I18n.t('hud.boss_encounter')}</div>
-          <div id="hud-boss-name" class="boss-banner-name">ELITE GOLEM OF TORMENT</div>
-          <div class="boss-hpbar-track">
-            <div id="hud-boss-hpbar-fill" class="boss-hpbar-fill" style="width: 100%;"></div>
+      <!-- Wraps the top stat bar and the banner stack below it in ONE flex column so the two
+           space themselves based on actual rendered height, instead of each guessing a fixed
+           top-offset for the other (see the '.hud-header-stack' CSS comment in index.html —
+           this used to overlap visibly whenever the stat bar rendered slightly taller than the
+           66px gap '.hud-banner-stack' assumed). -->
+      <div class="hud-header-stack">
+        <!-- Top Center Bar -->
+        <div class="hud-top-bar">
+          <div class="hud-stat-box wave-box">
+            <span class="icon">⚔️</span>
+            <span id="hud-wave">WAVE 1/30</span>
+          </div>
+          <div class="hud-stat-box timer-box">
+            <span class="icon">⏳</span>
+            <span id="hud-timer">00:00</span>
+          </div>
+          <div class="hud-stat-box kill-box">
+            <span class="icon">💀</span>
+            <span id="hud-kills">0</span>
+          </div>
+          <div class="hud-stat-box gold-box">
+            <span class="icon">💰</span>
+            <span id="hud-gold">0</span>
           </div>
         </div>
 
-        <!-- Boss Execute Deadline Countdown (only visible once the grace period has passed) -->
-        <div id="hud-deadline-banner" class="hud-deadline-banner" style="display: none;">
-          <div class="deadline-banner-label">${I18n.t('hud.deadline_warning')}</div>
-          <div id="hud-deadline-timer" class="deadline-banner-timer">5:00</div>
+        <!-- Wraps the three banners below in a flex column so they space themselves based on
+             actual rendered height instead of each guessing its own fixed top-offset (that's
+             what let a long boss name push the deadline countdown into overlapping it). -->
+        <div class="hud-banner-stack">
+          <!-- Active Shrine Buff Banner -->
+          <div id="hud-shrine-buff" class="hud-shrine-buff" style="display: none;">
+            <span id="shrine-buff-icon" class="shrine-buff-icon">⚡</span>
+            <span id="shrine-buff-name" class="shrine-buff-name">SHRINE OF SPEED</span>
+            <span id="shrine-buff-timer" class="shrine-buff-timer">10.0s</span>
+          </div>
+
+          <!-- Boss Announcement Banner -->
+          <div id="hud-boss-banner" class="hud-boss-banner" style="display: none;">
+            <div class="boss-banner-label" id="hud-boss-banner-label">${I18n.t('hud.boss_encounter')}</div>
+            <div id="hud-boss-name" class="boss-banner-name">ELITE GOLEM OF TORMENT</div>
+            <div class="boss-hpbar-track">
+              <div id="hud-boss-hpbar-fill" class="boss-hpbar-fill" style="width: 100%;"></div>
+            </div>
+          </div>
+
+          <!-- Boss Execute Deadline Countdown (only visible once the grace period has passed) -->
+          <div id="hud-deadline-banner" class="hud-deadline-banner" style="display: none;">
+            <div class="deadline-banner-label">${I18n.t('hud.deadline_warning')}</div>
+            <div id="hud-deadline-timer" class="deadline-banner-timer">5:00</div>
+          </div>
         </div>
       </div>
 
