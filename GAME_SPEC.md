@@ -16,7 +16,7 @@
 - **Elemental Reaction System**: Combinations of Status Effects (Frost, Burn, Shock, Bleed, Holy) triggering massive secondary reactions (Shatter, Bloodflame, Superconduct, Conflagration).
 - **Deep PoE-Style Skill Tree**: "Ancient Roots of Ascension" with interactive runic nodes, major keystones, and stat progression.
 - **Mythic Evolution Crafting**: Synergy combinations allowing base skills to ascend into catastrophic battlefield-clearing powers.
-- **Wellkeeper & Vault Equipment**: Extract loot during active runs via Well Shrines to unlock persistent gear at camp.
+- **Gear Drops & Vault Equipment**: Monster kills can drop gear mid-run (bosses guaranteed, weighted toward higher rarity) — banked straight to the finder's persistent Vault, never handed out by an achievement (see §7).
 - **Live GM Airdrop Engine**: Real-time HTTP & CLI event dispatcher for instant player compensation and live server rewards.
 
 ---
@@ -156,25 +156,23 @@ When a player levels up a signature skill to **Rank 3** and acquires its require
 The Skill Tree is modeled after the *Path of Exile* constellation web:
 - **Starting Point**: Each class has a dedicated root (`sw_root`, `ar_root`, `so_root`, etc.).
 - **Universal Hub**: Connects all class trees via `uni_root`.
-- **Node Allocation**: Players spend **Gold Coins** to allocate nodes. A node can only be unlocked if an adjacent connected node has already been allocated.
+- **Node Allocation**: Players spend **Soul Coins** (renamed from Gold Coins 2026-09-11, see §11.1) to allocate nodes. A node can only be unlocked if an adjacent connected node has already been allocated.
 - **Node Types**:
   - *Minor Nodes*: +HP, +Damage, +Move Speed, +Area of Effect.
-  - *Notable Nodes*: Unique combat perks (e.g. Outlaw Gold Bag, Golden Sixes, Astral Aegis).
+  - *Notable Nodes*: Unique combat perks (e.g. Outlaw Soul Bag, Golden Sixes, Astral Aegis).
   - *Keystones*: Game-changing build modifiers (e.g. Converting excess heal into absorption shields).
 - **Persistence**: Saved automatically in `localStorage` under `torment_meta_save_v2`.
-- **Safeguards**: `MetaProgression.canAllocateNode()` rejects spending on a node whose `classType` hero isn't unlocked, and `SkillTreeUI` shows a confirm dialog ("Spend N Gold to permanently unlock X?") before any node purchase — both added after a bug allowed spending gold on classes the player didn't own with no confirmation.
+- **Safeguards**: `MetaProgression.canAllocateNode()` rejects spending on a node whose `classType` hero isn't unlocked, and `SkillTreeUI` shows a confirm dialog ("Spend N Soul Coins to permanently unlock X?") before any node purchase — both added after a bug allowed spending currency on classes the player didn't own with no confirmation.
 
 ---
 
-## 7. Equipment, Wellkeeper & Vault System
+## 7. Equipment, Gear Drops & Vault System
 
-- **Equipment Slots**: 5 Slots (Head, Chest, Boots, Ring, Amulet).
-- **Rarity Hierarchy**: Common (White) ➔ Rare (Blue) ➔ Epic (Purple) ➔ Legendary (Gold) ➔ Mythic (Crimson).
-- **Well Shrines**:
-  - Found during active runs.
-  - A player standing at the well can deposit found gear items.
-  - **Shared Team Reward**: When extracted, all team members unlock the item in the Camp Vault!
-- **Blacksmith Forge**: At Camp, players can equip and forge gear before launching a run.
+- **Equipment Slots**: 6 slots (Head, Chest, Boots, Gloves, Ring, Amulet) — `GearSlot` in `gearData.ts`.
+- **Rarity Hierarchy**: Common ➔ Rare ➔ Unique, 3 items per slot (18 items total in `GEAR_CATALOG`). `GearRarity` also allows a `'magic'` tier but no catalog item currently uses it.
+- **Monster Gear Drops** (added 2026-09-11, replaces an earlier unfinished "Well Shrine deposit" design that was never wired up server-side — only a stub `PickupType.WELL_GEAR` enum value and a minimap filter existed): a normal monster kill has a `GAME_CONSTANTS.GEAR_DROP_CHANCE` (1.5%) chance to drop one piece of gear, weighted toward common (`GameRoom.rollGearDrop()`: common 70 / rare 25 / unique 5). **Every boss kill guarantees exactly one gear drop instead**, weighted toward higher rarity (common 30 / rare 45 / unique 25). The dropped `WELL_GEAR` pickup expires after 60s uncollected, same as other timed world drops. On pickup, only the collector is granted the item — `GameRoom` sends them a personal `WELL_GEAR_RETRIEVED` message (client calls `MetaProgression.addGearToVault()`), while every player nearby just sees a `broadcastDamageNumber` callout naming the finder and the item.
+- **Gear must only ever come from monster kills, never from an achievement**: `trialQuests.ts`'s `TrialRewardType` deliberately has no `'GEAR'` case (removed 2026-09-11 — 3 quests that used to hand out specific unique/rare items now pay Soul Coins instead, scaled to difficulty). Equipment should feel earned from a real fight.
+- **Blacksmith Forge**: At Camp, players can equip gear (`MetaProgression.equipGear()`) from their Vault (`vaultInventory`) before launching a run; stats stack additively across all 6 equipped slots (`getEquippedStatsTotal()`).
 
 ---
 
@@ -283,10 +281,14 @@ pm2 save
 
 ---
 
-## 11. Co-op Gold Economy & Trait Power Tiers
+## 11. Co-op Soul Coin Economy & Trait Power Tiers
 
-### 11.1 Personal Gold Wallets
-Gold is **per-player, not a shared team pool**: `ServerPlayer.gold` credits whoever actually collects a `GOLD_COIN` or `TREASURE_CHEST` pickup (`handlePickupCollection()` in `GameRoom.ts`). A run's `GAME_OVER` payload reports `personalGold` (this player's own collected total) separately from a `teamGold`/`playerCount` bucket split evenly across the party — `teamGold` starts at **0** every match (fixed 2026-09-10; it used to seed 35,000 as a "starting gift", silently handing out free gold every single run) and only grows via `grantBonusGold()`, the `/api/grant-gold` GM command. EXP remains fully shared team-wide regardless of who lands the kill.
+> Renamed 2026-09-11: the currency was previously called "Gold Coin" everywhere in the UI — pure display rename to "Soul Coin" (Thai: เหรียญวิญญาณ), no mechanics change. Internal identifiers (`gold`, `GOLD_COIN`, `GOLD_DROP_CHANCE`, `/api/grant-gold`, etc.) were deliberately left as-is; only player-facing text changed.
+
+### 11.1 Personal Soul Coin Wallets
+Soul Coins are **per-player, not a shared team pool**: `ServerPlayer.gold` credits whoever actually collects a `GOLD_COIN` or `TREASURE_CHEST` pickup (`handlePickupCollection()` in `GameRoom.ts`), at `GAME_CONSTANTS.GOLD_DROP_CHANCE` (2.2% per kill, named constant added 2026-09-11 — was previously an inline `0.022`). A run's `GAME_OVER` payload reports `personalGold` (this player's own collected total) separately from a `teamGold`/`playerCount` bucket split evenly across the party — `teamGold` starts at **0** every match (fixed 2026-09-10; it used to seed 35,000 as a "starting gift", silently handing out free gold every single run) and only grows via `grantBonusGold()`, the `/api/grant-gold` GM command. EXP remains fully shared team-wide regardless of who lands the kill.
+
+**Surrendering** (added 2026-09-11) keeps only `GAME_CONSTANTS.SURRENDER_GOLD_RETENTION` (50%) of a player's personally-collected gold, rounded down — a deliberate-bailout penalty, unlike dying or timing out which still pay out 100%. Scoped precisely in `GameRoom.handleSurrender()`: applies to the surrendering player only, tagged via `GAME_OVER.reason: 'SURRENDER'` so the client shows a distinct subtitle — the co-op fallback broadcast that reaches teammates who died naturally (not by choice) is untouched.
 
 ### 11.2 Power Tiers (S/A/B/C/D)
 Every trait card's `rarity` maps 1:1 to a power tier via `getPowerTier()` in `classes.ts`:
@@ -302,7 +304,7 @@ Every trait card's `rarity` maps 1:1 to a power tier via `getPowerTier()` in `cl
 Tier affects **both** drop odds (`getTierWeight(rarity, tierLuckPct)`, shifted by the `flatTierLuckPct` skill-tree keystone) and the actual magnitude of a card's effect — a D-tier and an S-tier card with the same theme (e.g. both granting Max HP) differ in value proportionally to `TIER_POWER_MULTIPLIER`, not just in how often they appear. The tier letter and a color-coded badge (matching the card's rarity border) render on every level-up card in `TraitSelector.ts`; cards flagged `isSignature` (a class's personal skill, gated behind unlocking it in the Skill Tree) additionally show a cyan "Signature Skill" badge so they read as visually distinct from universal cards.
 
 ### 11.3 Magnet Pickup
-A low-chance (`GAME_CONSTANTS.MAGNET_DROP_CHANCE`, 1.5% per kill) pickup that, when collected, sweeps every EXP gem and gold coin currently on the map to the collecting player with a cosmetic pull-in spark animation (`MAGNET_PULL_SPARK` projectile, purely visual — it does not change who ends up keeping the gold, that's still decided by the personal-wallet rule above).
+A low-chance (`GAME_CONSTANTS.MAGNET_DROP_CHANCE`, **0.75%** per kill — halved from 1.5% on 2026-09-11, still felt too common at the old rate) pickup that, when collected, sweeps every EXP gem and Soul Coin currently on the map to the collecting player with a cosmetic pull-in spark animation (`MAGNET_PULL_SPARK` projectile, purely visual — it does not change who ends up keeping the gold, that's still decided by the personal-wallet rule above). Also added 2026-09-11: the pickup now expires after 60s if uncollected (`duration`/`maxDuration`, same mechanism as Treasure Chest/Health Potion) — previously it had no expiry at all, so one dropped behind the ever-advancing swarm front line would sit on the map as permanent clutter for the rest of the run.
 
 ## 12. Performance & Graphics Quality
 - **Server**: broadcast payload is serialized once per room per tick (§8.1); `VFX2D.ts` avoids `ctx.shadowBlur`/regenerated gradients on the highest-frequency draws (EXP gems, gold coins); `HordeSpriteRenderer.ts` (the monster renderer — up to 740 concurrent) uses pure sprite-sheet `drawImage` batching, no per-monster `shadowBlur`/gradients at all.
@@ -333,6 +335,26 @@ A 3-part audit (host VPS, server code, client code) plus follow-up fixes closed 
 - **Unhandled promise rejections could kill the process**: the progression HTTP handlers and a TOCTOU race in `/api/register` (two concurrent registrations for the same username could both pass the pre-check) threw without being caught, and Node terminates on unhandled rejections by default. Wrapped via a `safeHandler()` helper returning a generic 500, plus an explicit `SQLITE_CONSTRAINT` catch in register.
 - **Host (Contabo VPS)**: SSH password auth was actually enabled (two conflicting `sshd_config.d` drop-ins; the wrong one won) with a usable root password and no fail2ban — now `PasswordAuthentication no` / `PermitRootLogin prohibit-password` via a drop-in that sorts first. The Node process listened on the wildcard address, one firewall misconfiguration away from bypassing nginx entirely — now bound to `127.0.0.1` explicitly (override with `HOST` env if a deploy genuinely needs otherwise). `data/game.db*` tightened from `644` to `600`. nginx: added `X-Content-Type-Options`/`X-Frame-Options`, hid the version string (`server_tokens off`), and added `limit_req` zones (`api_zone` 5r/s on `/api/`, `general_zone` 20r/s on `/ws`). **Caution**: don't put `limit_req` on the static-file `location /` — sprite assets legitimately burst dozens of parallel requests on page load and this broke real gameplay the first time it was tried.
 - **Deliberately left open**: `/api/grant-gold` still has no auth (an explicit, accepted GM command for friend-testing — don't "fix" this without asking), locking root's password entirely, splitting the game-server process off root into its own user, and TLS (needs a domain name first, currently IP-only).
+
+---
+
+## 14. Boss Combat: Attack Patterns (added 2026-09-11)
+
+Bosses previously had zero abilities beyond the same "Default Melee Chaser" contact-damage AI every basic monster uses — `ServerMonster.isRanged()` never included `ELITE_GOLEM`/`LORD_OF_TORMENT`. `GameRoom.updateBossAbilities()` (called once per tick per boss, right after grid insertion) now gives each boss type its own kit:
+
+- **Elite Golem — Ground Slam**: every 7s, if any player is within 260px, deals 2.5× the golem's base damage to every player within a 180px radius and spawns a `TITAN_QUAKE_WAVE` visual (existing projectile type, reused so no new client rendering was needed).
+- **Lord of Torment — Void Barrage**: every 6s, if the nearest player is within 550px, fires 5 `ENEMY_VOID_ORB` projectiles in a fan spread (±0.5 rad) at 80% of the boss's base damage each.
+- **Lord of Torment — Reinforcements**: every 15s, summons 2 Hellhounds near itself via `HordeDirector.getNextEntityId()` (the same collision-safe ID minting used by the `ALTAR_VOID` shrine's boss-spawn).
+
+`ServerMonster` gained two staggered timer fields (`bossAbilityTimer`, `bossSummonTimer`, randomized 0-3s/0-6s on spawn) so a boss doesn't fire every ability in its first second alive.
+
+## 15. Client-Side Bug Fixes (2026-09-11)
+
+Three unrelated client bugs found and fixed in the same session:
+
+- **Pause didn't actually stop sound**: `GameRoom.tick()` reset `this.damageNumbers = []` *after* its `isPaused` early-return, so whatever was in the array from the last active tick (e.g. mid-combat when the pause menu opened) kept re-broadcasting unchanged on every frozen tick — the client's hit-impact sound/VFX trigger just checks "is this tick's damageNumbers non-empty," so it fired continuously for as long as the game stayed paused. Fixed by moving the reset before the pause check. (An earlier, incomplete fix only covered the Dash sound specifically, via a client-side `isPaused` guard on `performDash()` — that stayed in place since it's a real, if redundant, belt-and-suspenders guard, but the actual root cause was server-side.)
+- **Reroll/Banish potions looked like no-ops**: `TraitSelector.showChoices()` queued (`pendingQueue`) any second `LEVEL_UP_CHOICE` message that arrived while the trait modal was already open, on the assumption it could only be a second, unrelated level-up stacking up. In practice the server already handles that exact scenario itself (`GameRoom.startLevelUpChoice()`'s `pendingLevelUpChoices` counter only re-sends a fresh choice *after* the client has closed the current modal) — so the only time a second `LEVEL_UP_CHOICE` can arrive while `isShowing` is true is a Reroll or Banish response to the currently-open pick. The queue silently swallowed it instead of displaying it. Fixed by removing the queue entirely — `showChoices()` now always replaces what's on screen immediately.
+- **English-mode stage descriptions showed Thai text**: `LobbyUI.ts`'s stage-select card had `stageDesc = isTh ? I18n.t(...) : stage.description`, but `stage.description` in `stages.ts` is itself Thai text (unlike the `stageName`/`stageSub` fields one line above, which already picked the correct language) — swapped to match that existing pattern.
 
 ---
 *Created and maintained with Antigravity AI — Built for limitless dark fantasy co-op survival.*
