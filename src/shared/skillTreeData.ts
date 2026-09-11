@@ -38,6 +38,12 @@ export interface SkillTreeNode {
     damageBonus?: number;
     expMultiplier?: number;
     tierLuck?: number; // % shift toward rarer (S/A) level-up cards, see getTierWeight()
+    // Base access to the Reroll/Banish/Lock potions — these start at 0 (ServerPlayer.ts) and
+    // are only usable once a node grants them, same additive pool a Trial Quest reward can also
+    // add to (see MetaProgression.getPassiveTiersForClass()).
+    extraRerolls?: number;
+    extraBanishes?: number;
+    extraLocks?: number;
   };
   /** Defaults to 'increased' when omitted — see the StatModType doc comment above. */
   modType?: StatModType;
@@ -6272,10 +6278,61 @@ export const CLASS_SKILL_TREES: Record<string, ClassSkillTree> = {
         cost: 0,
         x: 500,
         y: 500,
-        connections: ['uni_exp_1', 'uni_exp_branch_left', 'uni_exp_branch_right'],
+        connections: ['uni_exp_1', 'uni_exp_branch_left', 'uni_exp_branch_right', 'uni_alchemist_reroll', 'uni_alchemist_banish', 'uni_alchemist_lock'],
         description: 'The ancient cosmic origin tree shared by all classes. Starting origin root.',
         descriptionTh: 'ต้นไม้ทักษะจักรวาลโบราณที่ทุกคลาสใช้ร่วมกัน จุดเริ่มต้นของสายทักษะ',
         stats: { maxHp: 10 }
+      },
+
+      // --- Alchemist's Cache: base access to the Reroll/Banish/Lock potions (added
+      // 2026-09-11). These start at 0 on every character (ServerPlayer.ts) — the potion is
+      // unusable in-run until its node here is allocated, same "adjacent to an already-
+      // allocated node" rule as everything else in the tree (all three sit directly off the
+      // root, so any one can be taken independently of the other two). ---
+      uni_alchemist_reroll: {
+        id: 'uni_alchemist_reroll',
+        name: "Alchemist's Reroll Vial",
+        nameTh: 'ขวดยารีโรลนักเล่นแร่แปรธาตุ',
+        type: 'minor',
+        classType: 'universal',
+        icon: '🎲',
+        cost: 40,
+        x: 380,
+        y: 600,
+        connections: ['uni_root'],
+        description: 'UNLOCKS the Reroll potion — start every run with 2 charges to reroll a level-up card selection.',
+        descriptionTh: 'ปลดล็อกน้ำยารีโรล — เริ่มทุกเกมพร้อม 2 ครั้งสำหรับสุ่มการ์ดเลือกเลเวลอัพใหม่',
+        stats: { extraRerolls: 2 }
+      },
+      uni_alchemist_banish: {
+        id: 'uni_alchemist_banish',
+        name: "Alchemist's Banishing Ash",
+        nameTh: 'ผงเถ้าสาปนักเล่นแร่แปรธาตุ',
+        type: 'minor',
+        classType: 'universal',
+        icon: '🚫',
+        cost: 40,
+        x: 500,
+        y: 630,
+        connections: ['uni_root'],
+        description: 'UNLOCKS the Banish potion — start every run with 2 charges to permanently remove a trait from your card pool.',
+        descriptionTh: 'ปลดล็อกน้ำยาแบนการ์ด — เริ่มทุกเกมพร้อม 2 ครั้งสำหรับลบพรออกจากกองไพ่ถาวร',
+        stats: { extraBanishes: 2 }
+      },
+      uni_alchemist_lock: {
+        id: 'uni_alchemist_lock',
+        name: "Alchemist's Binding Sigil",
+        nameTh: 'อักขระผนึกนักเล่นแร่แปรธาตุ',
+        type: 'minor',
+        classType: 'universal',
+        icon: '🔒',
+        cost: 30,
+        x: 620,
+        y: 600,
+        connections: ['uni_root'],
+        description: 'UNLOCKS the Lock potion — start every run with 1 charge to guarantee a chosen trait reappears in your next level-up.',
+        descriptionTh: 'ปลดล็อกน้ำยาล็อกการ์ด — เริ่มทุกเกมพร้อม 1 ครั้งสำหรับการันตีพรที่เลือกไว้จะกลับมาในเลเวลอัพครั้งถัดไป',
+        stats: { extraLocks: 1 }
       },
 
       // --- Central EXP Trunk ---

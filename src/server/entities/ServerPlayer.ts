@@ -73,10 +73,13 @@ export class ServerPlayer implements GridEntity {
   public treePassives: Record<string, number> = {};
   public acquiredTraits: string[] = [];
 
-  // Alchemist Potions (Reroll, Banish, Lock)
-  public potionRerolls: number = 2;
-  public potionBanishes: number = 2;
-  public potionLocks: number = 1;
+  // Alchemist Potions (Reroll, Banish, Lock) — start at 0 (2026-09-11): each is now gated
+  // behind its own Skill Tree node (uni_alchemist_reroll/banish/lock, see skillTreeData.ts)
+  // instead of being free by default. initSkillTreeUnlocks() below adds whatever the player's
+  // allocated nodes (+ any Trial Quest bonus) grant.
+  public potionRerolls: number = 0;
+  public potionBanishes: number = 0;
+  public potionLocks: number = 0;
   public banishedTraits: Set<string> = new Set();
   public lockedTraitId: string | null = null;
 
