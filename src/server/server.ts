@@ -10,8 +10,11 @@ import { GameRoom } from './engine/GameRoom';
 import { createUser, findUserByUsername, findUserById, getProgression, setProgression } from './db';
 import { hashPassword, verifyPassword, signToken, verifyToken, isRateLimited, USERNAME_RE, MIN_PASSWORD_LENGTH } from './auth';
 import { logGameEvent, logError, shutdownTelemetry } from './telemetry/TelemetryBuffer';
+import { telemetryDb } from './telemetry/telemetryDb';
+import { getEventSummary, getErrorSummary } from './telemetry/telemetryQueries';
 import { SERVER_BUILD_VERSION } from './telemetry/buildVersion';
 import type { GameEventType, ErrorCategory } from '../shared/telemetryTypes';
+import fs from 'fs';
 
 interface ConnectedClient {
   ws: WebSocket;
@@ -380,6 +383,15 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
+const VALID_GAME_EVENT_TYPES = new Set<GameEventType>([
+  'run_start',
+  'level_up_choice',
+  'death',
+  'wave_reached',
+  'boss_kill',
+  'run_end'
+]);
+
 async function handleTelemetryEvents(req: http.IncomingMessage, res: http.ServerResponse) {
   if (isTelemetryRateLimited(getClientIp(req))) {
     return sendJson(res, 429, { success: false, error: 'Too many telemetry requests — try again shortly' });
@@ -397,7 +409,14 @@ async function handleTelemetryEvents(req: http.IncomingMessage, res: http.Server
     if (!e) continue;
     const runId = capString(e.runId, 200);
     const eventType = capString(e.eventType, 40);
-    if (!runId || !eventType || typeof e.elapsedMs !== 'number' || typeof e.partySize !== 'number') continue;
+    if (
+      !runId ||
+      !eventType ||
+      !VALID_GAME_EVENT_TYPES.has(eventType as GameEventType) ||
+      typeof e.elapsedMs !== 'number' ||
+      typeof e.partySize !== 'number'
+    )
+      continue;
     // elapsed_ms is a client-reported DURATION (safe from clock skew — it's a relative span, not
     // an absolute time), but created_at is always server time below, never anything the client
     // supplies — see the telemetry spec's guard against trusting client wall-clock.
@@ -418,6 +437,24 @@ async function handleTelemetryEvents(req: http.IncomingMessage, res: http.Server
   sendJson(res, 200, { success: true, accepted });
 }
 
+// Client-supplied `category` was previously only length-capped, not checked against this list —
+// an arbitrary string would flow straight into error_log and, if a future consumer (the
+// telemetry dashboard included) ever rendered it unescaped, that's a stored-XSS vector from an
+// unauthenticated endpoint. Rejecting anything outside the known set closes that off at the
+// boundary regardless of how any downstream consumer renders it.
+const VALID_ERROR_CATEGORIES = new Set<ErrorCategory>([
+  'js_exception',
+  'promise_rejection',
+  'render_error',
+  'ws_disconnect',
+  'ws_reconnect',
+  'server_exception',
+  'tick_error',
+  'db_error',
+  'high_latency',
+  'logic_anomaly'
+]);
+
 async function handleTelemetryErrors(req: http.IncomingMessage, res: http.ServerResponse) {
   if (isTelemetryRateLimited(getClientIp(req))) {
     return sendJson(res, 429, { success: false, error: 'Too many telemetry requests — try again shortly' });
@@ -435,7 +472,7 @@ async function handleTelemetryErrors(req: http.IncomingMessage, res: http.Server
     if (!e) continue;
     const category = capString(e.category, 40);
     const message = capString(e.message, 500);
-    if (!category || !message) continue;
+    if (!category || !message || !VALID_ERROR_CATEGORIES.has(category as ErrorCategory)) continue;
     // client_info is whitelisted to browser/os/screen by ClientTelemetry itself before this ever
     // ships — never IP or a device fingerprint (see the telemetry spec's guard on this field).
     logError({
@@ -450,6 +487,57 @@ async function handleTelemetryErrors(req: http.IncomingMessage, res: http.Server
     accepted++;
   }
   sendJson(res, 200, { success: true, accepted });
+}
+
+// --- Telemetry dashboard: GET /admin/telemetry (page) + GET /api/admin/telemetry/summary (data) ---
+// Separate secret from JWT_SECRET — this isn't a player account, there's no admin/role concept
+// in the `users` table today (see GAME_WIKI.md's telemetry section), and this data (error stack
+// traces, per-player behavior patterns) shouldn't be reachable by just any registered player.
+// Same insecure-dev-default-with-warning pattern as JWT_SECRET (auth.ts) for local dev.
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'dev-only-admin-secret-set-ADMIN_SECRET-before-deploying';
+if (!process.env.ADMIN_SECRET) {
+  console.warn('⚠️  ADMIN_SECRET not set — using an insecure development default. Set it before deploying.');
+}
+
+/** Returns true (caller proceeds) or has already written a 401/429 response and returned false.
+ * Reuses auth.ts's isRateLimited() — the same brute-force-guard purpose as login, so sharing its
+ * bucket/threshold is fine, not a separate concern like the telemetry ingest rate limit above. */
+function requireAdminSecret(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  const provided = req.headers['x-admin-secret'];
+  if (typeof provided === 'string' && provided === ADMIN_SECRET) return true;
+  if (isRateLimited(`admin:${getClientIp(req)}`)) {
+    sendJson(res, 429, { success: false, error: 'Too many attempts — try again shortly' });
+    return false;
+  }
+  sendJson(res, 401, { success: false, error: 'Missing or invalid admin secret' });
+  return false;
+}
+
+function handleTelemetrySummary(req: http.IncomingMessage, res: http.ServerResponse) {
+  if (!requireAdminSecret(req, res)) return;
+  sendJson(res, 200, {
+    success: true,
+    events: getEventSummary(telemetryDb),
+    errors: getErrorSummary(telemetryDb)
+  });
+}
+
+const TELEMETRY_DASHBOARD_PATH = path.resolve(__dirname, '../../admin/telemetry-dashboard.html');
+
+function handleTelemetryDashboardPage(req: http.IncomingMessage, res: http.ServerResponse) {
+  // The page itself is served with no auth (it's just static HTML/JS — nothing sensitive is in
+  // it), same as index.html; the actual data fetch inside it carries X-Admin-Secret and is what
+  // requireAdminSecret() above gates. Read fresh off disk each request rather than cached in
+  // memory — this is an infrequently-hit internal tool, not the 25Hz game loop.
+  fs.readFile(TELEMETRY_DASHBOARD_PATH, 'utf-8', (err, html) => {
+    if (err) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Dashboard page not found');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(html);
+  });
 }
 
 const server = http.createServer((req, res) => {
@@ -487,6 +575,14 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === '/api/telemetry/errors' && req.method === 'POST') {
     safeHandler(handleTelemetryErrors)(req, res);
+    return;
+  }
+  if (url.pathname === '/api/admin/telemetry/summary' && req.method === 'GET') {
+    handleTelemetrySummary(req, res);
+    return;
+  }
+  if (url.pathname === '/admin/telemetry' && req.method === 'GET') {
+    handleTelemetryDashboardPage(req, res);
     return;
   }
 

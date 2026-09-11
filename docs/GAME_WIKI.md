@@ -17,6 +17,7 @@
 | 2026-09-11 | Risk audit หลังแก้ #21: เปลี่ยน RETURN_TO_HUB จาก fixed-delay (150ms) เป็น ack-based (`RETURN_TO_HUB_ACK` + fallback timeout 800ms) + พบและแก้ risk ใหม่ #22 (`requireAuth` ไม่เช็คว่า user ยังมีอยู่จริง ทำ `POST /api/progression` พังแบบ unhandled 500 ถ้า token เก่ากว่า DB) | `docs/archive/2026-09-11-return-to-hub-victory-trap-fix.md` |
 | 2026-09-11 | เพิ่มระบบ Telemetry & Error Logging ใหม่ทั้งระบบ (`telemetry.db` แยกจาก `game.db`, ตาราง `game_events`+`error_log`, `TelemetryBuffer` batched flush, capture point ฝั่ง server 6 event type + client error capture) — ดู §5.7-5.8 ใหม่ + risk #23, #24 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-11 | Risk audit หลังพัฒนา telemetry (user ขอ "ลดความเสี่ยงให้ต่ำที่สุด"): เพิ่ม per-IP rate limit บน telemetry endpoint (แก้ risk #23), เพิ่ม `run_end` ให้ผู้เล่น co-op ที่ surrender ระหว่างทีมเล่นต่อด้วย (เดิมไม่มี), เพิ่ม `checkMonsterSanity()` คู่กับ `checkPlayerSanity()` เดิม | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | เพิ่ม Telemetry Dashboard (`/admin/telemetry` + `GET /api/admin/telemetry/summary`, auth: `ADMIN_SECRET`) แก้ risk #25 — ระหว่างทดสอบพบ stored-XSS ในตาราง error ของ dashboard (draft แรกใช้ `innerHTML` render ค่าจาก endpoint ที่ไม่มี auth) แก้เป็น `textContent` ทันที + เพิ่ม category/event_type whitelist validation ที่ ingest endpoint เป็นชั้นป้องกันที่สอง — ดู §5.7.1 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 
 ## สารบัญ
 
@@ -714,6 +715,38 @@ curl แล้ว — ดู dev-update ที่อ้างอิง) **แต
 `game_events` เป็น server-authoritative ล้วนในรอบนี้ (ไม่มี game_event ฝั่ง client ที่ต้อง capture)
 endpoint นี้เตรียมไว้สำหรับ client-side game telemetry ในอนาคตเท่านั้น
 
+### 5.7.1 Telemetry Dashboard
+
+ที่มา: `admin/telemetry-dashboard.html` (static page ใหม่), `src/server/telemetry/telemetryQueries.ts`,
+route ใหม่ใน `server.ts`
+
+หน้าเว็บ internal สำหรับดูภาพรวม `game_events`/`error_log` — ไม่มี dashboard มาก่อน (เดิม risk #25
+บอกว่าต้องอ่านผ่าน SQLite client ตรงๆ) ตอนนี้แก้แล้ว:
+
+- **`GET /admin/telemetry`** — หน้า dashboard (static HTML, เสิร์ฟตรงจาก server เดิม อ่านไฟล์สดทุก
+  request ไม่ cache เพราะเป็น internal tool ที่ไม่ได้ถูกเรียกบ่อย) ตัวหน้าเองไม่มี auth (ไม่มีอะไร
+  sensitive อยู่ใน markup) แต่การดึงข้อมูลจริงข้างในต้องผ่าน auth
+- **`GET /api/admin/telemetry/summary`** — endpoint เดียวคืนสรุปทั้งหมด (event count ต่อ type, death
+  cause breakdown, wave distribution, card pick rate ต่อ rarity, run outcome breakdown, average
+  playtime, error summary) คำนวณจาก `getEventSummary()`/`getErrorSummary()`
+  (`telemetryQueries.ts`) — SELECT ธรรมดาแล้ว aggregate ใน JS ไม่ใช้ SQLite `json_extract()` เพราะ
+  ไม่การันตีว่า build ของ `better-sqlite3` มี JSON1 extension เปิดอยู่
+- **Auth**: `ADMIN_SECRET` env var ใหม่ แยกจาก `JWT_SECRET` โดยสิ้นเชิง (ระบบ user ปัจจุบันไม่มี
+  role/admin field เลย ไม่อยากผูกกับ player account) มี insecure dev-default + warning เหมือน
+  `JWT_SECRET` ส่งผ่าน header `X-Admin-Secret` เก็บไว้ใน `localStorage` ฝั่ง browser หลัง submit
+  ครั้งแรก auth ผิดโดน `isRateLimited()` เดิม (bucket เดียวกับ login brute-force guard)
+
+**⚠️ พบและแก้ stored-XSS ระหว่างทดสอบ (2026-09-12)**: draft แรกของหน้า dashboard render ตาราง error
+ด้วย `tr.innerHTML = \`...${err.message}...\`` — `message`/`category` มาจาก
+`POST /api/telemetry/errors` ที่**ไม่มี auth และไม่ sanitize HTML** โดยตรง เท่ากับใครก็ inject
+`<img src=x onerror=...>` เข้าไปได้ แล้วโค้ดจะรันในเบราว์เซอร์ของ admin เองตอนเปิด dashboard (ขโมย
+`ADMIN_SECRET` จาก `localStorage` ได้ทันที) ยืนยันด้วยการยิง payload จริงเข้า error_log แล้วเปิด
+dashboard เห็น `<img>` tag render ตรงๆ ไม่ใช่ text แก้โดยเปลี่ยนไปใช้ `textContent` ล้วนแทน
+`innerHTML` ทุกจุดที่ render ค่าจาก DB (ยืนยันซ้ำ: payload เดิมกลับมาเป็น text เฉยๆ,
+`window.__xss_fired` ยังคง `undefined`) พร้อมเพิ่ม `VALID_ERROR_CATEGORIES`/`VALID_GAME_EVENT_TYPES`
+whitelist ที่ `server.ts`'s ingest endpoint ปฏิเสธ category/event_type ที่ไม่อยู่ใน enum จริง
+(defense-in-depth ชั้นที่สอง กันไม่ให้ค่าแปลกๆ เข้า DB เลย ไม่ต้องพึ่งแค่การ render ฝั่ง client ให้ถูก)
+
 ### 5.8 Stability Risk — Telemetry & Error Logging System
 
 - ✅ **ลดความเสี่ยงแล้ว (2026-09-11, risk audit หลังพัฒนา)** — ~~🟡 กลาง — `/api/telemetry/events`/`/errors` ไม่มี auth เลย~~: ยังไม่มี auth ตามที่ตั้งใจไว้ (สอดคล้องกับ `/api/grant-gold`) แต่เพิ่ม `isTelemetryRateLimited()` (40 req/60วิ ต่อ IP, `server.ts`) เป็นชั้นป้องกันที่สอง คู่กับ per-request cap เดิม — ทดสอบแล้วว่า request ที่ 41+ ใน 60 วิ โดน `429` จริง (curl loop 45 ครั้ง: 40×200, 5×429)
@@ -762,7 +795,7 @@ endpoint นี้เตรียมไว้สำหรับ client-side game
 17. Duplicated "หา nearest player" logic ใน boss abilities 4 จุด (§3.7) — ยังไม่แก้
 18. vaultInventory ไม่มี cap (§2.6) — ยังไม่แก้
 24. `telemetry.db` ไม่มี retention/prune policy (§5.8) — ตั้งใจไม่ทำตอนนี้ (friend-testing scale) — ยังไม่แก้
-25. ไม่มี dashboard อ่าน telemetry (§5.8) — ต้องอ่านผ่าน SQLite client ตรงๆ ไปก่อน — ยังไม่แก้
+25. ~~ไม่มี dashboard อ่าน telemetry~~ (§5.7.1) — **✅ แก้แล้ว 2026-09-12**: `/admin/telemetry` + `GET /api/admin/telemetry/summary` (auth: `ADMIN_SECRET`) — ระหว่างทำพบ stored-XSS ใน draft แรก แก้แล้ว (ดู §5.7.1)
 
 ---
 

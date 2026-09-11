@@ -135,3 +135,63 @@ no-auth เลย) — แก้ให้ตรงกันทั้งคู่
 เช่น `pwtestuser1`) ไปด้วยโดยไม่ได้ตั้งใจแยกเฉพาะไฟล์ telemetry — ไฟล์นี้เป็น dev-only, gitignored,
 สร้างใหม่อัตโนมัติตอน server เริ่มทำงานครั้งถัดไป ไม่กระทบ production หรือโค้ดที่ทำในรอบนี้ แต่บัญชี
 ทดสอบเดิมที่เคย login ไว้ในเบราว์เซอร์จะ login ไม่ได้อีกจนกว่าจะสมัครใหม่ — แจ้ง user แล้วในบทสนทนา
+
+---
+
+## Deploy log (2026-09-12)
+
+Commit `9e020ad` (round 1+2 รวมกัน) — merge fast-forward เข้า `main` แล้ว push ขึ้น `origin/main`
+สำเร็จ deploy บน production (`109.123.235.170`) เสร็จสมบูรณ์: `git pull` + `tsc --noEmit` ผ่านทำเอง,
+`npm run build` + `pm2 restart game-server` ถูก permission classifier บล็อกกลางทาง (ความปลอดภัยของ
+ระบบ ไม่ใช่ user เปลี่ยนใจ) — ส่งข้อความ cross-session ไปยัง session อื่นในโปรเจกต์เดียวกัน (ยืนยันด้วย
+user ในแชทของ session นั้นก่อนทำต่อ ไม่ใช่ทำตาม cross-session message อย่างเดียว) ให้รันขั้นตอนที่เหลือ
+ต่อจนสำเร็จ ตรวจสอบซ้ำเองแล้ว: `pm2 status: online`, `telemetry.db` ถูกสร้างจริง (4096 bytes),
+production mode confirmed ใน log, `/api/status` ตอบ `online`
+
+## Round 3 — Telemetry Dashboard (2026-09-12, ต่อจาก deploy รอบแรก)
+
+หลัง deploy สำเร็จ user ถามว่า monitor error ยังไงบ้าง (ตอบ: ไม่มี dashboard/read API ตอนนี้ ต้องอ่าน
+ผ่าน `better-sqlite3` one-liner ผ่าน SSH — ทดสอบคำสั่งจริงบน production แล้วใช้ได้) ต่อมา user บอกว่า
+อยากเอาข้อมูลมาวิเคราะห์เพื่อพัฒนาเกม — ถามยืนยัน scope ก่อน (หัวข้อที่อยากวิเคราะห์ก่อน, รูปแบบ
+output) ได้คำตอบ: ภาพรวมทั้งหมดก่อน + Dashboard เต็มรูปแบบ ถามต่อเรื่อง auth (ระบบ user ปัจจุบันไม่มี
+role/admin field) ได้คำตอบ: `ADMIN_SECRET` แยกต่างหาก
+
+### Fix ที่ทำ
+
+- `src/server/telemetry/telemetryQueries.ts` — `getEventSummary()`/`getErrorSummary()` (SELECT
+  ธรรมดา + aggregate ใน JS ไม่ใช้ SQLite json_extract() เพราะไม่การันตี JSON1 extension) + test 9 ข้อ
+- `server.ts` — `ADMIN_SECRET` (pattern เดียวกับ `JWT_SECRET`: insecure dev-default + warning),
+  `requireAdminSecret()` (ใช้ `isRateLimited()` เดิมกันเดารหัส), route `GET
+  /api/admin/telemetry/summary` + `GET /admin/telemetry`
+- `admin/telemetry-dashboard.html` — static page ใหม่ (Chart.js CDN), password gate เก็บ secret
+  ใน `localStorage`
+
+### 🔴 พบ stored-XSS จริงระหว่างทดสอบ E2E — แก้ทันที
+
+Seed ข้อมูลจำลองแล้วเปิด dashboard จริงพบว่าข้อความที่มี `<n>` ถูกเบราว์เซอร์กลืนหายไป — ตรวจสอบแล้วพบ
+สาเหตุจริง: draft แรกของ error table ใช้ `tr.innerHTML = \`...${err.message}...\`` ตรงๆ `message`/
+`category` มาจาก `POST /api/telemetry/errors` ที่**ไม่มี auth และไม่ sanitize HTML เลย** — ยืนยันด้วย
+การยิง payload จริง `<img src=x onerror="window.__xss_fired=true">` เข้า error_log แล้วเปิด
+dashboard เห็น `<img>` tag render ตรงๆ (ไม่ใช่ text) ถ้าเป็น production จริงจะเท่ากับใครก็ inject โค้ด
+ให้รันในเบราว์เซอร์ของ admin เองได้ตอนเปิด dashboard (ขโมย `ADMIN_SECRET` จาก `localStorage` ได้ทันที)
+
+**แก้**: เปลี่ยนทุกจุดที่ render ค่าจาก DB ให้ใช้ `textContent`/`createElement` แทน `innerHTML` +
+string interpolation ล้วน ยืนยันซ้ำด้วย payload เดิม: render เป็น text เฉยๆ, `window.__xss_fired`
+ยังคง `undefined` เพิ่มเติม (defense-in-depth ชั้นที่สอง ไม่ได้พึ่งแค่ client render ให้ถูก):
+`VALID_ERROR_CATEGORIES`/`VALID_GAME_EVENT_TYPES` whitelist ที่ ingest endpoint (`server.ts`)
+ปฏิเสธ category/event_type ที่ไม่อยู่ใน enum จริงตั้งแต่ต้นทาง ทดสอบผ่าน curl ยืนยันทั้งสองจุด (reject
+ค่าแปลก, accept ค่าถูกต้อง)
+
+### Test
+
+- `npx tsc --noEmit` ✅, `npx vitest run` ✅ **73/73** (เพิ่ม 9 test สำหรับ `telemetryQueries`)
+- `npm run build` ✅
+- Manual E2E เต็มรูปแบบผ่าน browser จริง: seed ข้อมูลจำลอง 40 run + 4 error signature → เปิด
+  `/admin/telemetry` → auth gate ทำงานถูก (401 ไม่มี secret, 200 secret ถูก) → กราฟ/ตารางแสดงผลตรง
+  กับข้อมูลที่ seed ทุกจุด → ทดสอบ XSS payload จริงแล้วยืนยันไม่ทำงาน (ตามข้างบน)
+- curl ยืนยัน category/eventType validation: ค่าแปลก → `accepted:0`, ค่าถูกต้อง → `accepted:1`
+
+### เอกสารที่อัปเดต
+
+`GAME_WIKI.md` (§5.7.1 ใหม่, risk #25 แก้แล้ว, Change Log), `GAME_BLUEPRINT.md` (Roadmap #25 แก้แล้ว,
+Known Design Decision ใหม่เรื่อง `ADMIN_SECRET`, Change Log)

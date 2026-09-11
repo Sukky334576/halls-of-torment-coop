@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Torment of Souls — Telemetry Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: #0f0f14; color: #e5e5ea;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; color: #ffd166; }
+  .subtitle { color: #8a8a97; font-size: 13px; margin-bottom: 24px; }
+  .gate {
+    max-width: 360px; margin: 80px auto; padding: 24px; background: #1a1a22;
+    border-radius: 10px; border: 1px solid #2a2a35;
+  }
+  .gate input {
+    width: 100%; padding: 10px; margin: 12px 0; background: #0f0f14; border: 1px solid #33333f;
+    border-radius: 6px; color: #e5e5ea; font-size: 14px;
+  }
+  .gate button, .refresh-btn {
+    width: 100%; padding: 10px; background: #ffd166; color: #1a1a22; border: none;
+    border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px;
+  }
+  .gate-error { color: #ff6b6b; font-size: 13px; margin-top: 8px; min-height: 16px; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .refresh-btn { width: auto; padding: 8px 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  .card {
+    background: #1a1a22; border: 1px solid #2a2a35; border-radius: 10px; padding: 16px;
+  }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: #8a8a97; margin: 0 0 12px; }
+  .stat-value { font-size: 28px; font-weight: 700; color: #ffd166; }
+  .stat-sub { font-size: 12px; color: #8a8a97; margin-top: 4px; }
+  canvas { max-height: 260px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #2a2a35; }
+  th { color: #8a8a97; font-weight: 500; }
+  .status-open { color: #ff6b6b; }
+  .status-fixed { color: #6bcf6b; }
+  .empty-note { color: #8a8a97; font-size: 13px; text-align: center; padding: 40px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="gate" class="gate">
+  <h1>🗡️ Telemetry Dashboard</h1>
+  <p class="subtitle">Admin secret ต้องใส่ก่อนเข้าดูข้อมูล</p>
+  <input id="secret-input" type="password" placeholder="Admin secret" autocomplete="off" />
+  <button id="gate-submit">เข้าดูข้อมูล</button>
+  <div id="gate-error" class="gate-error"></div>
+</div>
+
+<div id="dashboard" hidden>
+  <div class="toolbar">
+    <div>
+      <h1>🗡️ Torment of Souls — Telemetry Dashboard</h1>
+      <div class="subtitle" id="last-updated"></div>
+    </div>
+    <button class="refresh-btn" id="refresh-btn">รีเฟรช</button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Total Runs (run_end)</h2>
+      <div class="stat-value" id="stat-total-runs">—</div>
+    </div>
+    <div class="card">
+      <h2>Average Playtime</h2>
+      <div class="stat-value" id="stat-avg-playtime">—</div>
+    </div>
+    <div class="card">
+      <h2>Open Errors</h2>
+      <div class="stat-value" id="stat-open-errors">—</div>
+      <div class="stat-sub" id="stat-error-sub"></div>
+    </div>
+    <div class="card">
+      <h2>Total Events Logged</h2>
+      <div class="stat-value" id="stat-total-events">—</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Event Counts by Type</h2>
+      <canvas id="chart-event-counts"></canvas>
+    </div>
+    <div class="card">
+      <h2>Death Cause Breakdown</h2>
+      <canvas id="chart-death-causes"></canvas>
+    </div>
+    <div class="card">
+      <h2>Wave Reached Distribution</h2>
+      <canvas id="chart-wave-dist"></canvas>
+    </div>
+    <div class="card">
+      <h2>Card Pick Rate by Rarity</h2>
+      <canvas id="chart-rarity"></canvas>
+    </div>
+    <div class="card">
+      <h2>Run Outcomes</h2>
+      <canvas id="chart-outcomes"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Top Errors (by occurrence)</h2>
+    <table id="error-table">
+      <thead>
+        <tr><th>Category</th><th>Message</th><th>Source</th><th>Count</th><th>Status</th><th>Last Seen</th></tr>
+      </thead>
+      <tbody id="error-table-body"></tbody>
+    </table>
+    <div id="error-table-empty" class="empty-note" hidden>ไม่มี error ที่บันทึกไว้เลย</div>
+  </div>
+</div>
+
+<script>
+const SECRET_KEY = 'torment_admin_secret';
+const gate = document.getElementById('gate');
+const dashboard = document.getElementById('dashboard');
+const gateError = document.getElementById('gate-error');
+let charts = {};
+
+function getStoredSecret() {
+  try { return localStorage.getItem(SECRET_KEY); } catch { return null; }
+}
+function storeSecret(v) {
+  try { localStorage.setItem(SECRET_KEY, v); } catch { /* private mode etc — just won't persist */ }
+}
+function clearStoredSecret() {
+  try { localStorage.removeItem(SECRET_KEY); } catch {}
+}
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+function barChart(canvasId, labels, data, color) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  charts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: color || '#ffd166' }] },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8a8a97' }, grid: { color: '#2a2a35' } },
+        y: { ticks: { color: '#8a8a97' }, grid: { color: '#2a2a35' }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+function pieChart(canvasId, labels, data) {
+  destroyChart(canvasId);
+  const palette = ['#ffd166', '#ef476f', '#06d6a0', '#118ab2', '#a855f7', '#f97316', '#6bcf6b'];
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  charts[canvasId] = new Chart(ctx, {
+    type: 'pie',
+    data: { labels, datasets: [{ data, backgroundColor: labels.map((_, i) => palette[i % palette.length]) }] },
+    options: { plugins: { legend: { position: 'bottom', labels: { color: '#e5e5ea' } } } }
+  });
+}
+
+function formatMs(ms) {
+  if (ms === null || ms === undefined) return '—';
+  const totalSec = Math.round(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}m ${sec}s`;
+}
+
+function objEntries(obj) {
+  return Object.entries(obj || {});
+}
+
+function renderDashboard(data) {
+  const events = data.events;
+  const errors = data.errors;
+
+  document.getElementById('last-updated').textContent = 'อัปเดตล่าสุด: ' + new Date().toLocaleString('th-TH');
+  document.getElementById('stat-total-runs').textContent = events.totalRunEnds;
+  document.getElementById('stat-avg-playtime').textContent = formatMs(events.averagePlaytimeMs);
+  document.getElementById('stat-open-errors').textContent = errors.openCount;
+  document.getElementById('stat-error-sub').textContent = `${errors.fixedCount} fixed / ${errors.totalSignatures} signatures รวม`;
+  document.getElementById('stat-total-events').textContent = events.totalEvents;
+
+  const eventCountEntries = objEntries(events.eventCounts);
+  barChart('chart-event-counts', eventCountEntries.map((e) => e[0]), eventCountEntries.map((e) => e[1]));
+
+  const deathLabels = events.deathCauses.map((d) => d.monsterType !== undefined ? `${d.sourceType} (type ${d.monsterType})` : d.sourceType);
+  barChart('chart-death-causes', deathLabels, events.deathCauses.map((d) => d.count), '#ef476f');
+
+  const waveEntries = objEntries(events.waveDistribution).sort((a, b) => Number(a[0]) - Number(b[0]));
+  barChart('chart-wave-dist', waveEntries.map((e) => 'W' + e[0]), waveEntries.map((e) => e[1]), '#118ab2');
+
+  const rarityEntries = objEntries(events.cardPickRateByRarity);
+  pieChart('chart-rarity', rarityEntries.map((e) => e[0]), rarityEntries.map((e) => e[1]));
+
+  const outcomeEntries = objEntries(events.runOutcomes);
+  pieChart('chart-outcomes', outcomeEntries.map((e) => e[0]), outcomeEntries.map((e) => e[1]));
+
+  const tbody = document.getElementById('error-table-body');
+  tbody.innerHTML = '';
+  document.getElementById('error-table-empty').hidden = errors.topErrors.length > 0;
+  for (const err of errors.topErrors) {
+    // Every field here — category/message especially — originates from the unauthenticated
+    // POST /api/telemetry/errors endpoint with no HTML sanitization server-side (only a length
+    // cap). Building this row via innerHTML + string interpolation would be a stored-XSS hole:
+    // anyone could POST a crafted `message` and have it execute in the admin's own browser,
+    // right where ADMIN_SECRET sits in localStorage. textContent never interprets its input as
+    // markup, so this is the only safe way to render these values.
+    const tr = document.createElement('tr');
+    const lastSeen = new Date(err.lastSeenAt).toLocaleString('th-TH');
+    const cells = [
+      err.category,
+      err.message.length > 80 ? err.message.slice(0, 80) + '…' : err.message,
+      err.source,
+      String(err.occurrenceCount),
+      err.status,
+      lastSeen
+    ];
+    cells.forEach((text, i) => {
+      const td = document.createElement('td');
+      td.textContent = text;
+      if (i === 4) td.className = 'status-' + err.status;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+async function fetchSummary() {
+  const secret = getStoredSecret();
+  const res = await fetch('/api/admin/telemetry/summary', { headers: { 'X-Admin-Secret': secret || '' } });
+  if (res.status === 401) {
+    clearStoredSecret();
+    showGate('Secret ไม่ถูกต้องหรือหมดอายุ ลองใส่ใหม่');
+    return;
+  }
+  if (res.status === 429) {
+    showGate('พยายามเข้าถี่เกินไป รอสักครู่แล้วลองใหม่');
+    return;
+  }
+  if (!res.ok) {
+    showGate('เชื่อมต่อ server ไม่สำเร็จ (HTTP ' + res.status + ')');
+    return;
+  }
+  const body = await res.json();
+  gate.hidden = true;
+  dashboard.hidden = false;
+  renderDashboard(body);
+}
+
+function showGate(errorMsg) {
+  dashboard.hidden = true;
+  gate.hidden = false;
+  gateError.textContent = errorMsg || '';
+}
+
+document.getElementById('gate-submit').addEventListener('click', () => {
+  const val = document.getElementById('secret-input').value.trim();
+  if (!val) return;
+  storeSecret(val);
+  fetchSummary();
+});
+document.getElementById('secret-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('gate-submit').click();
+});
+document.getElementById('refresh-btn').addEventListener('click', fetchSummary);
+
+if (getStoredSecret()) {
+  fetchSummary();
+} else {
+  showGate('');
+}
+</script>
+</body>
+</html>
