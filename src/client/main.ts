@@ -144,6 +144,10 @@ class GameApp {
     this.sound = new SoundManager();
     this.hud = new HUD(hudContainer, this.sound);
     this.hud.onDash = () => this.performDash();
+    this.hud.onContinueRun = () => {
+      this.send({ type: 'CONTINUE_RUN' });
+      this.hud.hideGameOver();
+    };
 
     this.escMenu = new EscMenuUI(escContainer, this.sound);
     this.escMenu.onSurrender = () => {
@@ -584,11 +588,18 @@ class GameApp {
           }
 
           case 'GAME_OVER': {
-            this.isGameRunning = false;
-            this.isPaused = false;
-            this.escMenu.hide();
-            this.traits.hide(); // also clears the trait-modal-open body class
-            document.body.classList.remove('in-game');
+            // A continuable victory (cleared wave 30, Continue button offered) freezes the
+            // world server-side (GameRoom.victoryPending) but doesn't actually end the match —
+            // don't tear down the in-game view for it, only show the modal on top. Everything
+            // else below (banking gold/stats) stays unconditional: GameRoom.handleContinueRun()
+            // resets totalKills/gold to 0 on continue specifically so double-banking is safe.
+            if (!msg.canContinue) {
+              this.isGameRunning = false;
+              this.isPaused = false;
+              this.escMenu.hide();
+              this.traits.hide(); // also clears the trait-modal-open body class
+              document.body.classList.remove('in-game');
+            }
             // personalGold is what this player actually picked up themselves this run;
             // teamGold/playerCount is the leftover shared/bonus bucket (airdrops, starting gift), split evenly.
             const sharedShare = Math.floor(msg.teamGold / Math.max(1, msg.playerCount));
@@ -610,7 +621,7 @@ class GameApp {
               msg.victory ? (msg.clearedStageId || 1) : undefined
             );
             this.lobby.refreshCoins();
-            this.hud.showGameOver(msg.victory, msg.survivalTime, msg.totalKills, totalGoldEarned, msg.reason);
+            this.hud.showGameOver(msg.victory, msg.survivalTime, msg.totalKills, totalGoldEarned, msg.reason, msg.canContinue);
             break;
           }
         }
@@ -735,7 +746,8 @@ class GameApp {
       data.pickups,
       me.dashCooldownRemaining || 0,
       me.activeBuff,
-      data.bossDeadlineRemaining ?? null
+      data.bossDeadlineRemaining ?? null,
+      data.isEndless ?? false
     );
 
     // 6. Update ESC Codex Menu if open

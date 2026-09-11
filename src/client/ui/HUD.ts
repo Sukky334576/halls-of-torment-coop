@@ -30,6 +30,7 @@ export class HUD {
   public miniMap: MiniMap;
   public onDash: (() => void) | null = null;
   public onEscMenu: (() => void) | null = null;
+  public onContinueRun: (() => void) | null = null;
 
   constructor(container: HTMLElement, sound?: SoundManager) {
     this.container = container;
@@ -42,47 +43,57 @@ export class HUD {
     hudWrapper.id = 'hud-layer';
     hudWrapper.className = 'hud-layer';
     hudWrapper.innerHTML = `
-      <!-- Top Center Bar -->
-      <div class="hud-top-bar">
-        <div class="hud-stat-box wave-box">
-          <span class="icon">⚔️</span>
-          <span id="hud-wave">WAVE 1/30</span>
-        </div>
-        <div class="hud-stat-box timer-box">
-          <span class="icon">⏳</span>
-          <span id="hud-timer">00:00</span>
-        </div>
-        <div class="hud-stat-box kill-box">
-          <span class="icon">💀</span>
-          <span id="hud-kills">0</span>
-        </div>
-        <div class="hud-stat-box gold-box">
-          <span class="icon">💰</span>
-          <span id="hud-gold">0</span>
-        </div>
-      </div>
-
-      <!-- Wraps the three banners below in a flex column so they space themselves based on
-           actual rendered height instead of each guessing its own fixed top-offset (that's
-           what let a long boss name push the deadline countdown into overlapping it). -->
-      <div class="hud-banner-stack">
-        <!-- Active Shrine Buff Banner -->
-        <div id="hud-shrine-buff" class="hud-shrine-buff" style="display: none;">
-          <span id="shrine-buff-icon" class="shrine-buff-icon">⚡</span>
-          <span id="shrine-buff-name" class="shrine-buff-name">SHRINE OF SPEED</span>
-          <span id="shrine-buff-timer" class="shrine-buff-timer">10.0s</span>
+      <!-- Wraps the top stat bar and the banner stack below it in ONE flex column so the two
+           space themselves based on actual rendered height, instead of each guessing a fixed
+           top-offset for the other (see the '.hud-header-stack' CSS comment in index.html —
+           this used to overlap visibly whenever the stat bar rendered slightly taller than the
+           66px gap '.hud-banner-stack' assumed). -->
+      <div class="hud-header-stack">
+        <!-- Top Center Bar -->
+        <div class="hud-top-bar">
+          <div class="hud-stat-box wave-box">
+            <span class="icon">⚔️</span>
+            <span id="hud-wave">WAVE 1/30</span>
+          </div>
+          <div class="hud-stat-box timer-box">
+            <span class="icon">⏳</span>
+            <span id="hud-timer">00:00</span>
+          </div>
+          <div class="hud-stat-box kill-box">
+            <span class="icon">💀</span>
+            <span id="hud-kills">0</span>
+          </div>
+          <div class="hud-stat-box gold-box">
+            <span class="icon">💰</span>
+            <span id="hud-gold">0</span>
+          </div>
         </div>
 
-        <!-- Boss Announcement Banner -->
-        <div id="hud-boss-banner" class="hud-boss-banner" style="display: none;">
-          <div class="boss-banner-label" id="hud-boss-banner-label">${I18n.t('hud.boss_encounter')}</div>
-          <div id="hud-boss-name" class="boss-banner-name">ELITE GOLEM OF TORMENT</div>
-        </div>
+        <!-- Wraps the three banners below in a flex column so they space themselves based on
+             actual rendered height instead of each guessing its own fixed top-offset (that's
+             what let a long boss name push the deadline countdown into overlapping it). -->
+        <div class="hud-banner-stack">
+          <!-- Active Shrine Buff Banner -->
+          <div id="hud-shrine-buff" class="hud-shrine-buff" style="display: none;">
+            <span id="shrine-buff-icon" class="shrine-buff-icon">⚡</span>
+            <span id="shrine-buff-name" class="shrine-buff-name">SHRINE OF SPEED</span>
+            <span id="shrine-buff-timer" class="shrine-buff-timer">10.0s</span>
+          </div>
 
-        <!-- Boss Execute Deadline Countdown (only visible once the grace period has passed) -->
-        <div id="hud-deadline-banner" class="hud-deadline-banner" style="display: none;">
-          <div class="deadline-banner-label">${I18n.t('hud.deadline_warning')}</div>
-          <div id="hud-deadline-timer" class="deadline-banner-timer">5:00</div>
+          <!-- Boss Announcement Banner -->
+          <div id="hud-boss-banner" class="hud-boss-banner" style="display: none;">
+            <div class="boss-banner-label" id="hud-boss-banner-label">${I18n.t('hud.boss_encounter')}</div>
+            <div id="hud-boss-name" class="boss-banner-name">ELITE GOLEM OF TORMENT</div>
+            <div class="boss-hpbar-track">
+              <div id="hud-boss-hpbar-fill" class="boss-hpbar-fill" style="width: 100%;"></div>
+            </div>
+          </div>
+
+          <!-- Boss Execute Deadline Countdown (only visible once the grace period has passed) -->
+          <div id="hud-deadline-banner" class="hud-deadline-banner" style="display: none;">
+            <div class="deadline-banner-label">${I18n.t('hud.deadline_warning')}</div>
+            <div id="hud-deadline-timer" class="deadline-banner-timer">5:00</div>
+          </div>
         </div>
       </div>
 
@@ -176,6 +187,7 @@ export class HUD {
             <div><span id="go-kills-lbl">${I18n.t('gameover.kills')}</span> <span id="go-kills">0</span></div>
             <div><span id="go-gold-lbl">${I18n.t('gameover.gold')}</span> <span id="go-gold">0</span></div>
           </div>
+          <button id="btn-continue-run" class="btn btn-primary" style="display: none;">${I18n.t('gameover.btn_continue')}</button>
           <button id="btn-retry" class="btn btn-primary">${I18n.t('gameover.btn_retry')}</button>
         </div>
       </div>
@@ -236,6 +248,10 @@ export class HUD {
 
     document.getElementById('btn-retry')?.addEventListener('click', () => {
       window.location.reload();
+    });
+
+    document.getElementById('btn-continue-run')?.addEventListener('click', () => {
+      this.onContinueRun?.();
     });
 
     document.getElementById('btn-dash')?.addEventListener('click', () => {
@@ -301,7 +317,8 @@ export class HUD {
     pickups: PickupNetworkData[] = [],
     dashCooldownRemaining: number = 0,
     activeBuff?: { type: string; durationRemaining: number },
-    bossDeadlineRemaining: number | null = null
+    bossDeadlineRemaining: number | null = null,
+    isEndless: boolean = false
   ): void {
     this.updateDeadlineWarning(bossDeadlineRemaining);
 
@@ -309,8 +326,13 @@ export class HUD {
     const waveEl = document.getElementById('hud-wave');
     if (waveEl) {
       if (isBossWave && bossAlive) {
-        waveEl.textContent = I18n.t('hud.wave_boss', { wave: currentWave, maxWaves });
+        waveEl.textContent = isEndless
+          ? I18n.t('hud.wave_boss_endless', { wave: currentWave })
+          : I18n.t('hud.wave_boss', { wave: currentWave, maxWaves });
         waveEl.style.color = '#ff4d6d';
+      } else if (isEndless) {
+        waveEl.textContent = I18n.t('hud.wave_endless', { wave: currentWave || 1 });
+        waveEl.style.color = '#ffd166';
       } else {
         waveEl.textContent = I18n.t('hud.wave', { wave: currentWave || 1, maxWaves: maxWaves || 30 });
         waveEl.style.color = '#ffd166';
@@ -319,6 +341,11 @@ export class HUD {
 
     const bossBannerEl = document.getElementById('hud-boss-banner');
     const bossNameEl = document.getElementById('hud-boss-name');
+    const bossHpFillEl = document.getElementById('hud-boss-hpbar-fill');
+    if (bossHpFillEl) {
+      const bossMob = isBossWave && bossAlive ? monsters.find((m) => m.isBoss) : undefined;
+      bossHpFillEl.style.width = `${bossMob ? bossMob.hpPercent : 100}%`;
+    }
     if (bossBannerEl && bossNameEl) {
       if (isBossWave && bossName) {
         bossBannerEl.style.display = 'block';
@@ -666,10 +693,14 @@ export class HUD {
     survivalTime: number,
     totalKills: number,
     goldEarned: number,
-    reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER'
+    reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER',
+    canContinue: boolean = false
   ): void {
     const modal = document.getElementById('game-over-modal');
     if (!modal) return;
+
+    const btnContinue = document.getElementById('btn-continue-run');
+    if (btnContinue) btnContinue.style.display = canContinue ? 'inline-block' : 'none';
 
     modal.style.display = 'flex';
     const title = document.getElementById('game-over-title');
@@ -707,6 +738,13 @@ export class HUD {
     if (timeEl) timeEl.textContent = `${mins}:${secs}`;
     if (killsEl) killsEl.textContent = totalKills.toString();
     if (goldEl) goldEl.textContent = goldEarned.toString();
+  }
+
+  /** Hides the game-over/victory modal without touching the rest of the in-game view — used
+   * by the Continue button (see onContinueRun) since the game keeps running underneath it. */
+  public hideGameOver(): void {
+    const modal = document.getElementById('game-over-modal');
+    if (modal) modal.style.display = 'none';
   }
 
   public addFloatingMessage(x: number, y: number, text: string, color: string = '#facc15'): void {

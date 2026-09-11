@@ -591,7 +591,10 @@ export class MetaProgressionManager {
       expMultiplier: 0,
       critChance: 0,
       attackSpeed: 0,
-      tierLuck: 0
+      tierLuck: 0,
+      extraRerolls: 0,
+      extraBanishes: 0,
+      extraLocks: 0
     };
 
     // Per-stat buckets for the increased/more combination — populated across BOTH the
@@ -619,6 +622,9 @@ export class MetaProgressionManager {
         if (node.stats?.maxHp) statsTotal.maxHp += node.stats.maxHp;
         if (node.stats?.defense) statsTotal.defense += node.stats.defense;
         if (node.stats?.tierLuck) statsTotal.tierLuck += node.stats.tierLuck;
+        if (node.stats?.extraRerolls) statsTotal.extraRerolls += node.stats.extraRerolls;
+        if (node.stats?.extraBanishes) statsTotal.extraBanishes += node.stats.extraBanishes;
+        if (node.stats?.extraLocks) statsTotal.extraLocks += node.stats.extraLocks;
 
         const modType: StatModType = node.modType ?? 'increased';
         if (node.stats?.moveSpeed) addPct(pct.moveSpeed, node.stats.moveSpeed, STAT_SCALE_FACTORS.moveSpeed, modType);
@@ -653,11 +659,12 @@ export class MetaProgressionManager {
     statsTotal.critChance += gearStats.flatCritChancePct;
     statsTotal.attackSpeed += gearStats.flatAttackSpeedPct;
 
-    // 4. Add Extra Starting Potions from Trials!
+    // 4. Add Extra Starting Potions from Trials — additive on top of whatever the skill
+    // tree's own Alchemist's Cache nodes already granted above (step 2), not a replacement.
     const extraPotions = this.getExtraPotions();
-    statsTotal.extraRerolls = extraPotions.rerolls;
-    statsTotal.extraBanishes = extraPotions.banishes;
-    statsTotal.extraLocks = extraPotions.locks;
+    statsTotal.extraRerolls += extraPotions.rerolls;
+    statsTotal.extraBanishes += extraPotions.banishes;
+    statsTotal.extraLocks += extraPotions.locks;
 
     return statsTotal;
   }

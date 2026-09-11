@@ -277,6 +277,7 @@ export interface PlayerNetworkData {
   isAttacking: boolean;
   attackSeq: number;
   isDead: boolean;
+  reviveProgress?: number; // 0-1, only meaningful while isDead — see GAME_CONSTANTS.REVIVE_TIME_SECONDS
   isChoosingTrait?: boolean;
   level: number;
   exp: number;
@@ -344,6 +345,7 @@ export interface GameStateTick {
   isPaused?: boolean;
   currentWave: number;
   maxWaves: number;
+  isEndless?: boolean; // true once the party picked Continue past wave 30 (see GameRoom.handleContinueRun)
   waveTimeRemaining: number;
   isBossWave: boolean;
   bossName?: string;
@@ -381,6 +383,7 @@ export type ClientMessage =
   | { type: 'USE_POTION'; action: 'REROLL' | 'BANISH' | 'LOCK'; traitId?: string }
   | { type: 'SEND_WELL_GEAR'; gearId: string }
   | { type: 'SURRENDER' }
+  | { type: 'CONTINUE_RUN' }
   | { type: 'PAUSE_GAME'; isPaused: boolean }
   | { type: 'CREATE_ROOM'; roomName?: string; password?: string }
   | { type: 'LIST_ROOMS' }
@@ -435,4 +438,4 @@ export type ServerMessage =
   | { type: 'WELL_GEAR_RETRIEVED'; gearId: string; gearName: string; retrievedBy: string }
   | { type: 'ROOM_LIST'; rooms: RoomSummary[] }
   | { type: 'GRANT_GOLD'; amount: number; message: string; thaiMessage: string; grantId?: string }
-  | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number; reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER' };
+  | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number; reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER'; canContinue?: boolean };
