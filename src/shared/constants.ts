@@ -54,7 +54,15 @@ export const MONSTER_STATS = {
     maxHp: 18,
     speed: 180,
     damage: 6,
-    radius: 12,
+    // 12 -> 16 (2026-09-11): matches SKELETON's radius. Was the smallest hitbox in the game by
+    // a wide margin while sharing the exact same fixed 64x64 sprite draw size as every other
+    // ground monster (HordeSpriteRenderer draws every type at scale 1.0 / 64px regardless of
+    // `radius` — nothing here scales the sprite down to match a small hitbox). Combined with
+    // IMP's speed (180, second-fastest after Hellhound), landing an Archer arrow (radius 10)
+    // against its visually-much-larger sprite consistently read as "the arrow clearly hit it
+    // but dealt no damage" — a real miss against the tiny true hitbox, not a damage bug. See
+    // docs/archive/2026-09-11-imp-hitbox-fix.md.
+    radius: 16,
     expValue: 2,
     color: 0xd9381e
   },

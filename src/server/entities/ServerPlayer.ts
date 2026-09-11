@@ -82,6 +82,10 @@ export class ServerPlayer implements GridEntity {
   public potionLocks: number = 0;
   public banishedTraits: Set<string> = new Set();
   public lockedTraitId: string | null = null;
+  // Ids actually offered in the LEVEL_UP_CHOICE currently on screen — handleSelectTrait/
+  // handleUsePotion validate against this instead of trusting whatever traitId the client
+  // sends, so a modified client can't apply/banish/lock a card it was never shown.
+  public currentTraitChoiceIds: Set<string> = new Set();
 
   constructor(id: string, name: string, playerClass: PlayerClass) {
     this.id = id;

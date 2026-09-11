@@ -276,16 +276,38 @@ export class GameRoom {
 
   public handleSelectTrait(playerId: string, traitId: string): void {
     const player = this.players.get(playerId);
-    if (!player) return;
+    if (!player || !player.isChoosingTrait) return;
 
+    // Reject anything that wasn't part of the choices this player was actually offered — a
+    // modified client could otherwise apply/rank-up any TRAIT_POOL id regardless of class,
+    // rank cap, or pool state. Leaves isChoosingTrait untouched so a legitimate pick can still
+    // follow; see docs/GAME_WIKI.md §4.7 risk "LOCK/BANISH ไม่ validate traitId".
+    if (!player.currentTraitChoiceIds.has(traitId)) return;
     const trait = TRAIT_POOL.find((t) => t.id === traitId);
-    if (trait) {
-      trait.apply(player.stats, player.skills);
-      player.acquiredTraits.push(traitId);
-    }
+    if (!trait) return;
+    // Re-validate class/signature-unlock/rank here too, not just choice membership — catches a
+    // stale id whose eligibility changed between being offered and this pick landing (e.g. a
+    // BANISH on a different trait id shouldn't matter, but defends against future pool-mutating
+    // actions we haven't thought of yet).
+    if (trait.targetClass && trait.targetClass !== player.playerClass) return;
+    if (trait.isSignature && !player.unlockedSkills.has(trait.id)) return;
+    if (this.getSkillRank(trait.id, player.skills) >= 3) return;
+
+    trait.apply(player.stats, player.skills);
+    player.acquiredTraits.push(traitId);
     if (player.lockedTraitId === traitId) {
       player.lockedTraitId = null;
     }
+    player.currentTraitChoiceIds.clear();
+    this.finishLevelUpChoice(player);
+  }
+
+  /** Shared tail end of resolving a level-up pick — closes this player's card (whether they
+   * actually chose one or triggerLevelUpChoices had nothing left to offer), then either opens
+   * their next queued card or unpauses if nobody is left choosing. Split out of
+   * handleSelectTrait so the empty-pool skip path (see triggerLevelUpChoices) can reuse the
+   * exact same bookkeeping instead of duplicating it. */
+  private finishLevelUpChoice(player: ServerPlayer): void {
     player.isChoosingTrait = false;
 
     // Late joiner catching up to the party's level: queue up their next self-picked card
@@ -328,7 +350,9 @@ export class GameRoom {
         this.triggerLevelUpChoices(player);
       }
     } else if (action === 'BANISH') {
-      if (player.potionBanishes > 0 && traitId) {
+      // Only banish a trait actually part of the current offer — matches the same
+      // choice-membership check as handleSelectTrait.
+      if (player.potionBanishes > 0 && traitId && player.currentTraitChoiceIds.has(traitId)) {
         player.potionBanishes--;
         player.banishedTraits.add(traitId);
         if (player.lockedTraitId === traitId) {
@@ -341,7 +365,8 @@ export class GameRoom {
         if (player.lockedTraitId === traitId) {
           // Toggle off
           player.lockedTraitId = null;
-        } else if (player.potionLocks > 0) {
+        } else if (player.potionLocks > 0 && player.currentTraitChoiceIds.has(traitId)) {
+          // Only lock a trait actually part of the current offer.
           player.potionLocks--;
           player.lockedTraitId = traitId;
         }
@@ -2191,27 +2216,38 @@ export class GameRoom {
     monster.bossSummonTimer += dt;
 
     if (monster.type === MonsterType.ELITE_GOLEM) {
-      // Ground Slam: a telegraph-free but fair AOE (7s cooldown is long enough to react to
-      // the visual/audio cue once it lands) — punishes standing still in melee range.
+      // Ground Slam: a 0.4s telegraphed AOE (7s cooldown between casts) — punishes standing
+      // still in melee range, but gives a genuine warning window to back out of first. Used to
+      // be instant/telegraph-free (damage applied the same tick the cast started, with only a
+      // 0.45s POST-impact visual) — a modified client or a monster horde occluding the impact
+      // ring (see docs/archive/2026-09-11-projectile-zorder-fix.md) made it read as "damage
+      // with no visible cause". Two-phase now: TITAN_QUAKE_TELEGRAPH (warning ring, no damage)
+      // for slamTelegraphTimer's duration, then the real hit + TITAN_QUAKE_WAVE impact visual.
       const SLAM_COOLDOWN = 7;
       const SLAM_RADIUS = 180;
-      if (monster.bossAbilityTimer >= SLAM_COOLDOWN) {
-        const inRange = alivePlayers.some((p) => Math.hypot(p.x - monster.x, p.y - monster.y) <= 260);
-        if (inRange) {
-          monster.bossAbilityTimer = 0;
+      const SLAM_TELEGRAPH_DURATION = 0.4;
+
+      if (monster.slamTelegraphTimer > 0) {
+        monster.slamTelegraphTimer -= dt;
+        if (monster.slamTelegraphTimer <= 0) {
+          monster.slamTelegraphTimer = 0;
+          // Epicenter is frozen at cast time (slamTelegraphX/Y), not the golem's current
+          // position — it keeps chasing during the wind-up like normal, but the slam itself
+          // lands where it was cast so a player who moves off the warning ring during the 0.4s
+          // actually escapes it, instead of the hit just following them.
           for (const p of alivePlayers) {
-            if (Math.hypot(p.x - monster.x, p.y - monster.y) <= SLAM_RADIUS) {
+            if (Math.hypot(p.x - monster.slamTelegraphX, p.y - monster.slamTelegraphY) <= SLAM_RADIUS) {
               p.takeDamage(monster.damage * 2.5);
             }
           }
-          // Reuses the Cat Tank ultimate's shockwave visual — same "stone/earth impact" read,
-          // no new client rendering needed. damage: 0 since it's purely cosmetic here; the
-          // actual hits above are resolved directly against alivePlayers.
+          // Reuses the Cat Tank ultimate's shockwave visual — same "stone/earth impact" read.
+          // damage: 0 since it's purely cosmetic here; the actual hits above are resolved
+          // directly against alivePlayers.
           this.projectiles.push({
             id: ++this.nextProjId,
             type: ProjectileType.TITAN_QUAKE_WAVE,
-            x: monster.x,
-            y: monster.y,
+            x: monster.slamTelegraphX,
+            y: monster.slamTelegraphY,
             vx: 0,
             vy: 0,
             damage: 0,
@@ -2221,7 +2257,30 @@ export class GameRoom {
             pierceRemaining: 1,
             hitEntityIds: new Set()
           });
-          this.broadcastDamageNumber(monster.x, monster.y - 30, 0, false, '💥 GROUND SLAM!', '#a8a29e');
+          this.broadcastDamageNumber(monster.slamTelegraphX, monster.slamTelegraphY - 30, 0, false, '💥 GROUND SLAM!', '#a8a29e');
+        }
+      } else if (monster.bossAbilityTimer >= SLAM_COOLDOWN) {
+        const inRange = alivePlayers.some((p) => Math.hypot(p.x - monster.x, p.y - monster.y) <= 260);
+        if (inRange) {
+          monster.bossAbilityTimer = 0;
+          monster.slamTelegraphTimer = SLAM_TELEGRAPH_DURATION;
+          monster.slamTelegraphX = monster.x;
+          monster.slamTelegraphY = monster.y;
+          this.projectiles.push({
+            id: ++this.nextProjId,
+            type: ProjectileType.TITAN_QUAKE_TELEGRAPH,
+            x: monster.x,
+            y: monster.y,
+            vx: 0,
+            vy: 0,
+            damage: 0,
+            isCrit: false,
+            radius: SLAM_RADIUS,
+            lifeTime: SLAM_TELEGRAPH_DURATION,
+            pierceRemaining: 1,
+            hitEntityIds: new Set()
+          });
+          this.broadcastDamageNumber(monster.x, monster.y - 30, 0, false, '⚠️ GROUND SLAM INCOMING!', '#fbbf24');
         }
       }
 
@@ -2958,68 +3017,73 @@ export class GameRoom {
     }
   }
 
+  /** Current rank (0-3) of a rankable trait/signature skill, keyed by TRAIT_POOL id. Shared by
+   * triggerLevelUpChoices (building the offered pool) and handleSelectTrait (re-validating a
+   * pick server-side isn't past its rank cap before applying it). */
+  private getSkillRank(id: string, s: PlayerSkills): number {
+    switch (id) {
+      // Swordsman
+      case 'swordsman_whirlwind': return s.bladeWhirlwindRank || 0;
+      case 'swordsman_shockwave': return s.shockwaveSlashRank || 0;
+      case 'swordsman_retaliation': return s.ironRetaliationRank || 0;
+      case 'sw_rend_tear': return s.rendAndTearRank || 0;
+      case 'sw_fortress_stance': return s.fortressStanceRank || 0;
+      case 'swordsman_blood_cleave': return s.bloodCleaveRank || 0;
+      case 'swordsman_shield_bash': return s.shieldBashRank || 0;
+      // Archer
+      case 'archer_multishot': return s.multishotRank || 0;
+      case 'archer_lightning': return s.lightningArrowRank || 0;
+      case 'archer_windrunner': return s.windrunnerRank || 0;
+      case 'ar_rain_of_arrows': return s.rainOfArrowsRank || 0;
+      case 'ar_deadeye_pierce': return s.deadeyePierceRank || 0;
+      case 'archer_explosive_arrow': return s.explosiveShotRank || 0;
+      case 'archer_frost_trap': return s.frostTrapRank || 0;
+      // Sorceress
+      case 'sorceress_orbs': return s.orbitingOrbsRank || 0;
+      case 'sorceress_frost': return s.frostNovaRank || 0;
+      case 'sorceress_overcharge': return s.lightningOverchargeRank || 0;
+      case 'so_glacial_shatter': return s.glacialShatterRank || 0;
+      case 'so_astral_aegis': return s.astralAegisRank || 0;
+      case 'sorceress_meteor_strike': return s.meteorStrikeRank || 0;
+      case 'sorceress_blizzard_ring': return s.blizzardRingRank || 0;
+      // Cleric
+      case 'cleric_heal_aura': return s.holyRadianceRank || 0;
+      case 'cleric_judgment': return s.judgmentPillarsRank || 0;
+      case 'cleric_aegis': return s.blessedAegisRank || 0;
+      case 'cl_consecrated_ground': return s.consecratedGroundRank || 0;
+      case 'cleric_heavenly_thunder': return s.heavenlyThunderRank || 0;
+      case 'cleric_sanctum_barrier': return s.sanctumBarrierRank || 0;
+      // Commando
+      case 'commando_frag_grenade': return s.fragGrenadeRank || 0;
+      case 'commando_airstrike': return s.airstrikeDroneRank || 0;
+      case 'commando_ap_rounds': return s.apRoundsRank || 0;
+      case 'commando_tactical_reload': return s.tacticalReloadRank || 0;
+      // Cat Tank
+      case 'cattank_nine_lives': return s.nineLivesRank || 0;
+      case 'cattank_aggro_taunt': return s.aggroTauntRank || 0;
+      case 'cattank_chonk_armor': return s.chonkArmorRank || 0;
+      case 'cattank_hairball': return s.hairballLauncherRank || 0;
+      // Cowboy
+      case 'cowboy_quick_draw': return s.quickDrawFanRank || 0;
+      case 'cowboy_hollow_point': return s.bountyHunterBountyRank || 0;
+      case 'cowboy_lasso_upgrade': return s.ensnaringLassoRank || 0;
+      case 'cowboy_tumble': return s.tumbleDodgeRank || 0;
+      // Celestial Mecha
+      case 'mecha_saber_overdrive': return s.beamSaberCleaveRank || 0;
+      case 'mecha_laser_salvo': return s.wingLaserSalvoRank || 0;
+      case 'mecha_gn_barrier': return s.gnBarrierShieldRank || 0;
+      case 'mecha_thruster': return s.thrusterOverdriveRank || 0;
+      // The Gambler
+      case 'gambler_royal_flush': return s.fortuneCardsRank || 0;
+      case 'gambler_loaded_dice': return s.luckyDiceRank || 0;
+      case 'gambler_jackpot': return s.jackpot777SlotRank || 0;
+      case 'gambler_fortune_greed': return s.highRollerGreedRank || 0;
+      default: return -1;
+    }
+  }
+
   private triggerLevelUpChoices(player: ServerPlayer): void {
-    const getSkillRank = (id: string, s: PlayerSkills): number => {
-      switch (id) {
-        // Swordsman
-        case 'swordsman_whirlwind': return s.bladeWhirlwindRank || 0;
-        case 'swordsman_shockwave': return s.shockwaveSlashRank || 0;
-        case 'swordsman_retaliation': return s.ironRetaliationRank || 0;
-        case 'sw_rend_tear': return s.rendAndTearRank || 0;
-        case 'sw_fortress_stance': return s.fortressStanceRank || 0;
-        case 'swordsman_blood_cleave': return s.bloodCleaveRank || 0;
-        case 'swordsman_shield_bash': return s.shieldBashRank || 0;
-        // Archer
-        case 'archer_multishot': return s.multishotRank || 0;
-        case 'archer_lightning': return s.lightningArrowRank || 0;
-        case 'archer_windrunner': return s.windrunnerRank || 0;
-        case 'ar_rain_of_arrows': return s.rainOfArrowsRank || 0;
-        case 'ar_deadeye_pierce': return s.deadeyePierceRank || 0;
-        case 'archer_explosive_arrow': return s.explosiveShotRank || 0;
-        case 'archer_frost_trap': return s.frostTrapRank || 0;
-        // Sorceress
-        case 'sorceress_orbs': return s.orbitingOrbsRank || 0;
-        case 'sorceress_frost': return s.frostNovaRank || 0;
-        case 'sorceress_overcharge': return s.lightningOverchargeRank || 0;
-        case 'so_glacial_shatter': return s.glacialShatterRank || 0;
-        case 'so_astral_aegis': return s.astralAegisRank || 0;
-        case 'sorceress_meteor_strike': return s.meteorStrikeRank || 0;
-        case 'sorceress_blizzard_ring': return s.blizzardRingRank || 0;
-        // Cleric
-        case 'cleric_heal_aura': return s.holyRadianceRank || 0;
-        case 'cleric_judgment': return s.judgmentPillarsRank || 0;
-        case 'cleric_aegis': return s.blessedAegisRank || 0;
-        case 'cl_consecrated_ground': return s.consecratedGroundRank || 0;
-        case 'cleric_heavenly_thunder': return s.heavenlyThunderRank || 0;
-        case 'cleric_sanctum_barrier': return s.sanctumBarrierRank || 0;
-        // Commando
-        case 'commando_frag_grenade': return s.fragGrenadeRank || 0;
-        case 'commando_airstrike': return s.airstrikeDroneRank || 0;
-        case 'commando_ap_rounds': return s.apRoundsRank || 0;
-        case 'commando_tactical_reload': return s.tacticalReloadRank || 0;
-        // Cat Tank
-        case 'cattank_nine_lives': return s.nineLivesRank || 0;
-        case 'cattank_aggro_taunt': return s.aggroTauntRank || 0;
-        case 'cattank_chonk_armor': return s.chonkArmorRank || 0;
-        case 'cattank_hairball': return s.hairballLauncherRank || 0;
-        // Cowboy
-        case 'cowboy_quick_draw': return s.quickDrawFanRank || 0;
-        case 'cowboy_hollow_point': return s.bountyHunterBountyRank || 0;
-        case 'cowboy_lasso_upgrade': return s.ensnaringLassoRank || 0;
-        case 'cowboy_tumble': return s.tumbleDodgeRank || 0;
-        // Celestial Mecha
-        case 'mecha_saber_overdrive': return s.beamSaberCleaveRank || 0;
-        case 'mecha_laser_salvo': return s.wingLaserSalvoRank || 0;
-        case 'mecha_gn_barrier': return s.gnBarrierShieldRank || 0;
-        case 'mecha_thruster': return s.thrusterOverdriveRank || 0;
-        // The Gambler
-        case 'gambler_royal_flush': return s.fortuneCardsRank || 0;
-        case 'gambler_loaded_dice': return s.luckyDiceRank || 0;
-        case 'gambler_jackpot': return s.jackpot777SlotRank || 0;
-        case 'gambler_fortune_greed': return s.highRollerGreedRank || 0;
-        default: return -1;
-      }
-    };
+    const getSkillRank = (id: string, s: PlayerSkills): number => this.getSkillRank(id, s);
 
     // 1. Check for eligible Weapon Evolutions
     const eligibleEvolutions: TraitOption[] = [];
@@ -3107,6 +3171,24 @@ export class GameRoom {
       pool.splice(chosenIdx, 1);
     }
 
+    // Pool exhausted (every eligible trait maxed at rank 3 and/or banished away — most likely
+    // on a small-roster class with heavy BANISH use). Used to fall through and send an empty
+    // LEVEL_UP_CHOICE, leaving the player stuck on a card-less modal with isChoosingTrait stuck
+    // true forever (solo play stays paused too). Resolve the pick immediately instead, with a
+    // consolation heal so the level-up isn't a complete dead end.
+    if (selectedTraits.length === 0) {
+      player.currentTraitChoiceIds.clear();
+      const healedAmount = player.heal(Math.round(player.stats.maxHp * 0.25));
+      this.sendCallback(player.id, {
+        type: 'LEVEL_UP_SKIPPED',
+        healedAmount,
+        message: 'No upgrades available right now — healed instead!',
+        thaiMessage: 'ไม่มีการ์ดใหม่ให้เลือกตอนนี้ — ได้รับการรักษาแทน!'
+      });
+      this.finishLevelUpChoice(player);
+      return;
+    }
+
     const choices = selectedTraits.map((t) => {
       const curRank = getSkillRank(t.id, player.skills);
       const tier = getPowerTier(t.rarity);
@@ -3130,6 +3212,8 @@ export class GameRoom {
         isSignature: t.isSignature
       };
     });
+
+    player.currentTraitChoiceIds = new Set(selectedTraits.map((t) => t.id));
 
     this.sendCallback(player.id, {
       type: 'LEVEL_UP_CHOICE',

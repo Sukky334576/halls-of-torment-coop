@@ -244,6 +244,13 @@ export function getGearItem(id: string): GearItem | undefined {
  * gear drop roll to turn a chosen rarity into an actual item. */
 export function getRandomGearOfRarity(rarity: GearRarity): GearItem | undefined {
   const pool = Object.values(GEAR_CATALOG).filter((g) => g.rarity === rarity);
-  if (pool.length === 0) return undefined;
+  if (pool.length === 0) {
+    // No catalog items exist at this rarity tier yet (e.g. 'magic' is a defined GearRarity with
+    // no items assigned to it) — fall back to 'common' instead of silently returning undefined,
+    // which would otherwise surface as a dropped/missing gear reward with no diagnostic trail.
+    console.warn(`[gearData] No items found for rarity "${rarity}" — falling back to common`);
+    const commonPool = Object.values(GEAR_CATALOG).filter((g) => g.rarity === 'common');
+    return commonPool.length > 0 ? commonPool[Math.floor(Math.random() * commonPool.length)] : undefined;
+  }
   return pool[Math.floor(Math.random() * pool.length)];
 }

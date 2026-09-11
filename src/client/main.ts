@@ -560,6 +560,21 @@ class GameApp {
             break;
           }
 
+          case 'LEVEL_UP_SKIPPED': {
+            // Server had no eligible trait choices left to offer (every card maxed/banished) —
+            // close the card modal instead of leaving it stuck open with nothing to pick.
+            this.traits.hide();
+            const isThSkipped = I18n.getLanguage() === 'th';
+            this.lobby.showToast(isThSkipped ? msg.thaiMessage : msg.message);
+            if (this.isGameRunning && this.latestTick) {
+              const me = this.latestTick.players.find((p) => p.id === this.myId);
+              if (me && msg.healedAmount > 0) {
+                this.hud.addFloatingMessage(me.x, me.y - 45, `💚 +${msg.healedAmount} HP`, '#22c55e');
+              }
+            }
+            break;
+          }
+
           case 'GRANT_GOLD': {
             const grantKey = msg.grantId ? `torment_grant_${msg.grantId}` : 'torment_server_airdrop_35k_v2';
             if (!localStorage.getItem(grantKey)) {
@@ -835,10 +850,15 @@ class GameApp {
       this.renderer.beginScene();
 
       // 1. Pickups & Ground VFX
-      this.vfx.render(this.renderer.ctx, now);
+      this.vfx.renderGround(this.renderer.ctx, now);
 
       // 2. Monster Horde (Y-sorted)
       this.hordeRenderer.render(this.latestTick.monsters, now);
+
+      // 2.5 Projectiles & Hit Sparks — drawn AFTER the horde so they render in front of
+      // monster sprites instead of getting visually buried inside a dense pack (see
+      // VFX2D.renderOverlay's doc comment).
+      this.vfx.renderOverlay(this.renderer.ctx, now);
 
       // 3. Heroes with Class-Specific Visuals & Status
       this.playerSprites.render(this.renderer.ctx, this.latestTick.players, this.myId);

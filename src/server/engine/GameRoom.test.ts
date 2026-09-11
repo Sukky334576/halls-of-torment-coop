@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { GameRoom } from './GameRoom';
-import { PlayerClass } from '../../shared/types';
+import { PlayerClass, MonsterType } from '../../shared/types';
 import type { ServerPlayer } from '../entities/ServerPlayer';
+import { ServerMonster } from '../entities/ServerMonster';
+import { TRAIT_POOL } from '../../shared/classes';
 
 /**
  * Regression suite for the LEVEL_UP_CHOICE double-trigger bug: startLevelUpChoice() used to
@@ -33,6 +35,18 @@ function levelUpMessagesFor(sent: { playerId: string; msg: any }[], playerId: st
   return sent.filter((s) => s.playerId === playerId && s.msg.type === 'LEVEL_UP_CHOICE');
 }
 
+// FIX-2 (server-side trait-choice validation) means tests can no longer resolve a pick with an
+// arbitrary placeholder id — it has to be one of the ids the player was actually offered. This
+// reads the most recent LEVEL_UP_CHOICE sent to a player and grabs its first choice's id.
+function latestOfferedTraitId(sent: { playerId: string; msg: any }[], playerId: string): string {
+  const msgs = levelUpMessagesFor(sent, playerId);
+  const latest = msgs[msgs.length - 1];
+  if (!latest || !latest.msg.choices?.length) {
+    throw new Error(`No LEVEL_UP_CHOICE with choices found for ${playerId}`);
+  }
+  return latest.msg.choices[0].id;
+}
+
 describe('GameRoom level-up choice queueing (pendingLevelUpChoices)', () => {
   it('1. queues a second level-up instead of sending a second LEVEL_UP_CHOICE immediately', () => {
     const { room, sent } = makeRoom();
@@ -57,34 +71,34 @@ describe('GameRoom level-up choice queueing (pendingLevelUpChoices)', () => {
     (room as any).startLevelUpChoice(player); // queues one (per test 1)
     expect(player.pendingLevelUpChoices).toBe(1);
 
-    room.handleSelectTrait('p1', 'fake-trait-id'); // resolve card #1
+    room.handleSelectTrait('p1', latestOfferedTraitId(sent, 'p1')); // resolve card #1
 
     expect(player.pendingLevelUpChoices).toBe(0); // popped
     expect(player.isChoosingTrait).toBe(true); // card #2 is now open, not closed out
     expect(levelUpMessagesFor(sent, 'p1')).toHaveLength(2); // card #2 was actually sent
 
-    room.handleSelectTrait('p1', 'fake-trait-id'); // resolve card #2
+    room.handleSelectTrait('p1', latestOfferedTraitId(sent, 'p1')); // resolve card #2
     expect(player.isChoosingTrait).toBe(false); // now genuinely done
     expect(levelUpMessagesFor(sent, 'p1')).toHaveLength(2); // no further cards queued
   });
 
   it('3. solo mode: isPaused stays true across both queued picks, only clearing after both resolve', () => {
-    const { room } = makeRoom();
+    const { room, sent } = makeRoom();
     const player = addTestPlayer(room, 'solo');
 
     (room as any).startLevelUpChoice(player);
     (room as any).startLevelUpChoice(player);
     expect(room.isPaused).toBe(true);
 
-    room.handleSelectTrait('solo', 'fake-trait-id'); // card #1 resolved, card #2 opens
+    room.handleSelectTrait('solo', latestOfferedTraitId(sent, 'solo')); // card #1 resolved, card #2 opens
     expect(room.isPaused).toBe(true); // must NOT unpause yet — card #2 is still pending
 
-    room.handleSelectTrait('solo', 'fake-trait-id'); // card #2 resolved, queue empty
+    room.handleSelectTrait('solo', latestOfferedTraitId(sent, 'solo')); // card #2 resolved, queue empty
     expect(room.isPaused).toBe(false); // now safe to unpause
   });
 
   it("4. co-op mode: another player's isChoosingTrait/movement is untouched while one has a 2-deep queue", () => {
-    const { room } = makeRoom();
+    const { room, sent } = makeRoom();
     const busy = addTestPlayer(room, 'busy');
     const other = addTestPlayer(room, 'other');
 
@@ -95,11 +109,11 @@ describe('GameRoom level-up choice queueing (pendingLevelUpChoices)', () => {
     expect(other.isChoosingTrait).toBe(false);
     expect(other.pendingLevelUpChoices).toBe(0);
 
-    room.handleSelectTrait('busy', 'fake-trait-id'); // busy's card #2 opens
+    room.handleSelectTrait('busy', latestOfferedTraitId(sent, 'busy')); // busy's card #2 opens
     expect(other.isChoosingTrait).toBe(false); // still untouched
     expect(room.isPaused).toBe(false);
 
-    room.handleSelectTrait('busy', 'fake-trait-id'); // busy fully done
+    room.handleSelectTrait('busy', latestOfferedTraitId(sent, 'busy')); // busy fully done
     expect(busy.isChoosingTrait).toBe(false);
     expect(other.isChoosingTrait).toBe(false); // never touched throughout
   });
@@ -114,11 +128,99 @@ describe('GameRoom level-up choice queueing (pendingLevelUpChoices)', () => {
     expect(levelUpMessagesFor(sent, 'p1')).toHaveLength(1);
     expect(room.isPaused).toBe(true); // solo (this room has only 1 player)
 
-    room.handleSelectTrait('p1', 'fake-trait-id');
+    room.handleSelectTrait('p1', latestOfferedTraitId(sent, 'p1'));
     expect(player.isChoosingTrait).toBe(false);
     expect(player.pendingLevelUpChoices).toBe(0);
     expect(room.isPaused).toBe(false); // unpauses immediately, no queued card held it open
     expect(levelUpMessagesFor(sent, 'p1')).toHaveLength(1); // no phantom second card
+  });
+});
+
+describe('GameRoom trait-choice server-side validation (FIX-2, docs/GAME_WIKI.md §4.7)', () => {
+  it('rejects a traitId that was never offered — no trait applied, pick stays open', () => {
+    const { room, sent } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    (room as any).startLevelUpChoice(player);
+    const offeredId = latestOfferedTraitId(sent, 'p1');
+
+    room.handleSelectTrait('p1', 'totally-not-an-offered-id');
+
+    expect(player.isChoosingTrait).toBe(true); // still waiting on a real pick
+    expect(player.acquiredTraits).toHaveLength(0);
+    // Sanity check the offered id itself still resolves normally, proving the rejection above
+    // was about validation, not a broken pool.
+    room.handleSelectTrait('p1', offeredId);
+    expect(player.acquiredTraits).toEqual([offeredId]);
+    expect(player.isChoosingTrait).toBe(false);
+  });
+
+  it('rejects BANISH for a traitId outside the current offer — no potion spent, nothing banished', () => {
+    const { room, sent } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.potionBanishes = 1;
+    (room as any).startLevelUpChoice(player);
+
+    room.handleUsePotion('p1', 'BANISH', 'totally-not-an-offered-id');
+
+    expect(player.potionBanishes).toBe(1); // untouched
+    expect(player.banishedTraits.has('totally-not-an-offered-id')).toBe(false);
+    expect(levelUpMessagesFor(sent, 'p1')).toHaveLength(1); // no reroll was triggered
+  });
+
+  it('rejects LOCK for a traitId outside the current offer — no potion spent', () => {
+    const { room } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.potionLocks = 1;
+    (room as any).startLevelUpChoice(player);
+
+    room.handleUsePotion('p1', 'LOCK', 'totally-not-an-offered-id');
+
+    expect(player.potionLocks).toBe(1); // untouched
+    expect(player.lockedTraitId).toBeNull();
+  });
+});
+
+describe('GameRoom empty trait-pool skip (FIX-1, docs/GAME_WIKI.md §4.7 / §6 risk #2)', () => {
+  it('sends LEVEL_UP_SKIPPED with a consolation heal instead of an empty LEVEL_UP_CHOICE, and resolves the pick', () => {
+    const { room, sent } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.stats.hp = Math.max(1, player.stats.maxHp - 100); // room to observe the heal
+    for (const t of TRAIT_POOL) player.banishedTraits.add(t.id); // exhaust every possible offer
+
+    (room as any).startLevelUpChoice(player);
+
+    expect(levelUpMessagesFor(sent, 'p1')).toHaveLength(0); // never an empty-choices modal
+    const skipped = sent.filter((s) => s.playerId === 'p1' && s.msg.type === 'LEVEL_UP_SKIPPED');
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].msg.healedAmount).toBeGreaterThan(0);
+    expect(player.stats.hp).toBeGreaterThan(player.stats.maxHp - 100);
+    expect(player.isChoosingTrait).toBe(false); // resolved immediately, not stuck open
+  });
+
+  it('co-op: an empty pool for one player does not pause the room or affect a teammate', () => {
+    const { room } = makeRoom();
+    const empty = addTestPlayer(room, 'empty');
+    const other = addTestPlayer(room, 'other');
+    for (const t of TRAIT_POOL) empty.banishedTraits.add(t.id);
+
+    (room as any).startLevelUpChoice(empty);
+
+    expect(empty.isChoosingTrait).toBe(false);
+    expect(room.isPaused).toBe(false); // co-op never pauses on a single player's card
+    expect(other.isChoosingTrait).toBe(false);
+  });
+
+  it('does not heal past maxHp when the pool is empty', () => {
+    const { room, sent } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    // Already at full HP — the 25% consolation heal should clamp to 0 actual healing.
+    for (const t of TRAIT_POOL) player.banishedTraits.add(t.id);
+
+    (room as any).startLevelUpChoice(player);
+
+    const skipped = sent.filter((s) => s.playerId === 'p1' && s.msg.type === 'LEVEL_UP_SKIPPED');
+    expect(skipped[0].msg.healedAmount).toBe(0);
+    expect(player.stats.hp).toBe(player.stats.maxHp);
   });
 });
 
@@ -224,5 +326,93 @@ describe('GameRoom final-boss execute deadline (soft-lock fix)', () => {
     const overMsgs = gameOverMessagesFor(sent, 'p1');
     expect(overMsgs).toHaveLength(1);
     expect(overMsgs[0].msg.reason).toBeUndefined(); // plain wipe, not the boss-execute reason
+  });
+});
+
+/** Elite Golem positioned so its Ground Slam range check passes immediately (bossAbilityTimer
+ * already at the 7s cooldown threshold). See updateBossAbilities() in GameRoom.ts. */
+function makeSlamReadyGolem(x: number, y: number): ServerMonster {
+  const golem = new ServerMonster(9001, MonsterType.ELITE_GOLEM, x, y, 1, 1, 1, true, 'Test Golem');
+  golem.bossAbilityTimer = 7; // === SLAM_COOLDOWN, triggers immediately on the next tick
+  return golem;
+}
+
+/** addTestPlayer() gives a fresh 2s spawn-protection invulnerability (ServerPlayer's normal
+ * constructor behavior) which would silently no-op every takeDamage() call below and mask a
+ * real damage bug as a false pass — clear it so these tests actually exercise takeDamage(). */
+function clearSpawnProtection(player: ServerPlayer): void {
+  player.invulnerableTimer = 0;
+}
+
+describe('GameRoom Ground Slam telegraph (Elite Golem, docs/archive/2026-09-11-projectile-zorder-fix.md Fix B)', () => {
+  it('does not damage the player on the cast tick — only starts a non-damaging telegraph', () => {
+    const { room, sent } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.x = 0;
+    player.y = 0;
+    clearSpawnProtection(player);
+    const golem = makeSlamReadyGolem(0, 0); // standing right on top of the player
+
+    (room as any).updateBossAbilities(golem, 0.1, [player]);
+
+    expect(player.stats.hp).toBe(player.stats.maxHp); // no damage yet
+    expect(golem.slamTelegraphTimer).toBeGreaterThan(0); // wind-up started
+    const telegraphMsgs = sent.filter((s) => s.msg.type === 'LEVEL_UP_CHOICE'); // sanity: unrelated
+    expect(telegraphMsgs).toHaveLength(0);
+  });
+
+  it('applies damage only once the telegraph timer runs out', () => {
+    const { room } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.x = 0;
+    player.y = 0;
+    clearSpawnProtection(player);
+    const golem = makeSlamReadyGolem(0, 0);
+
+    (room as any).updateBossAbilities(golem, 0.1, [player]); // cast starts, telegraph = 0.4s
+    expect(player.stats.hp).toBe(player.stats.maxHp);
+
+    (room as any).updateBossAbilities(golem, 0.2, [player]); // 0.2s into the 0.4s wind-up
+    expect(player.stats.hp).toBe(player.stats.maxHp); // still charging, still no damage
+
+    (room as any).updateBossAbilities(golem, 0.2, [player]); // crosses the 0.4s mark — impact
+    expect(player.stats.hp).toBeLessThan(player.stats.maxHp);
+    expect(golem.slamTelegraphTimer).toBe(0);
+  });
+
+  it('lands where it was cast (frozen epicenter), not wherever the golem wanders to mid-charge', () => {
+    const { room } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.x = 0;
+    player.y = 0;
+    clearSpawnProtection(player);
+    const golem = makeSlamReadyGolem(0, 0);
+
+    (room as any).updateBossAbilities(golem, 0.1, [player]); // cast at (0,0)
+    golem.x = 900; // golem "wanders" far away during the wind-up (movement is a separate system)
+    golem.y = 900;
+
+    (room as any).updateBossAbilities(golem, 0.4, [player]); // resolve — player never moved
+
+    // Player standing at the ORIGINAL cast position still takes the hit even though the golem
+    // itself is now nowhere near them — the slam is anchored to where it was cast.
+    expect(player.stats.hp).toBeLessThan(player.stats.maxHp);
+  });
+
+  it('lets a player who moves out of the warning ring during the wind-up avoid the damage', () => {
+    const { room } = makeRoom();
+    const player = addTestPlayer(room, 'p1');
+    player.x = 0;
+    player.y = 0;
+    clearSpawnProtection(player);
+    const golem = makeSlamReadyGolem(0, 0); // SLAM_RADIUS = 180
+
+    (room as any).updateBossAbilities(golem, 0.1, [player]); // cast at (0,0)
+    player.x = 500; // dodges far outside SLAM_RADIUS before the impact resolves
+    player.y = 0;
+
+    (room as any).updateBossAbilities(golem, 0.4, [player]); // resolve
+
+    expect(player.stats.hp).toBe(player.stats.maxHp); // dodged successfully
   });
 });

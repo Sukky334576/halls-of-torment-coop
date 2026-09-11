@@ -35,6 +35,15 @@ export class ServerMonster implements GridEntity {
   public statusEffects: Map<ElementStatus, MonsterStatusEffect> = new Map();
   public defenseDebuff: number = 0; // e.g. 0.50 from Superconduct
 
+  // Elite Golem Ground Slam wind-up: >0 while a telegraphed slam is charging, counting down to
+  // the actual impact. slamTelegraphX/Y freeze the epicenter at the moment the cast started, so
+  // a player who dodges away during the wind-up escapes it even if the golem keeps chasing (the
+  // slam lands where it was cast, not wherever the golem wanders to mid-charge). See
+  // GameRoom.updateBossAbilities().
+  public slamTelegraphTimer: number = 0;
+  public slamTelegraphX: number = 0;
+  public slamTelegraphY: number = 0;
+
   constructor(
     id: number,
     type: MonsterType,
@@ -115,8 +124,11 @@ export class ServerMonster implements GridEntity {
         const step = this.speed * dt;
         this.x += (dx / dist) * Math.min(step, dist);
         this.y += (dy / dist) * Math.min(step, dist);
-      } else if (dist < 120) {
-        // Back off away from player (slower retreat so player can catch them)
+      } else if (dist < 120 && dist > 1e-6) {
+        // Back off away from player (slower retreat so player can catch them). Guarded against
+        // dist===0 (target sitting exactly on top of us — e.g. caller defaults target to our
+        // own position when every player is dead) which would otherwise divide by zero and
+        // set x/y to NaN, permanently breaking this monster's position.
         const step = this.speed * 0.5 * dt;
         this.x -= (dx / dist) * step;
         this.y -= (dy / dist) * step;
