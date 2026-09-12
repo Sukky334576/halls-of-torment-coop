@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createTelemetryConnection } from './telemetryDb';
-import { getEventSummary, getErrorSummary } from './telemetryQueries';
+import { getEventSummary, getErrorSummary, getSystemMetricsSeries } from './telemetryQueries';
 
 function seedEvent(
   db: Database.Database,
@@ -120,6 +120,31 @@ describe('telemetryQueries', () => {
       expect(summary.topErrors).toHaveLength(2);
       expect(summary.topErrors[0].category).toBe('server_exception');
       expect(summary.topErrors[1].category).toBe('render_error');
+    });
+  });
+
+  describe('getSystemMetricsSeries', () => {
+    function seedMetric(createdAt: number, hostCpuPct: number): void {
+      db.prepare(
+        `INSERT INTO system_metrics (host_cpu_pct, host_mem_used_mb, host_mem_total_mb, process_cpu_pct, process_rss_mb, created_at)
+         VALUES (?, 100, 1000, 5, 30, ?)`
+      ).run(hostCpuPct, createdAt);
+    }
+
+    it('returns points oldest-first, ready for a chart x-axis', () => {
+      seedMetric(3000, 30);
+      seedMetric(1000, 10);
+      seedMetric(2000, 20);
+      const series = getSystemMetricsSeries(db);
+      expect(series.map((p) => p.createdAt)).toEqual([1000, 2000, 3000]);
+      expect(series.map((p) => p.hostCpuPct)).toEqual([10, 20, 30]);
+    });
+
+    it('caps to the most recent maxPoints samples', () => {
+      for (let i = 0; i < 10; i++) seedMetric(i * 1000, i);
+      const series = getSystemMetricsSeries(db, 3);
+      expect(series).toHaveLength(3);
+      expect(series.map((p) => p.createdAt)).toEqual([7000, 8000, 9000]); // the 3 most recent, still oldest-first
     });
   });
 });

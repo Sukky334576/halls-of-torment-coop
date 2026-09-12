@@ -151,3 +151,42 @@ export function getErrorSummary(db: Database.Database, topN: number = 20): Error
 
   return { totalSignatures: rows.length, openCount, fixedCount, occurrencesBySource, occurrencesByCategory, topErrors };
 }
+
+export interface SystemMetricPoint {
+  createdAt: number;
+  hostCpuPct: number;
+  hostMemUsedMb: number;
+  hostMemTotalMb: number;
+  processCpuPct: number;
+  processRssMb: number;
+}
+
+/** Returns the most recent `maxPoints` samples, oldest first (chart-ready order) — bounds the
+ * response size regardless of how long system_metrics has been accumulating (see
+ * SystemMetricsSampler; there's no retention/prune policy on this table yet, same accepted gap
+ * as game_events/error_log). Default 500 points at the sampler's 30s cadence is ~4 hours of
+ * history, a reasonable default trend window for a dashboard chart. */
+export function getSystemMetricsSeries(db: Database.Database, maxPoints: number = 500): SystemMetricPoint[] {
+  const rows = db
+    .prepare(
+      `SELECT host_cpu_pct, host_mem_used_mb, host_mem_total_mb, process_cpu_pct, process_rss_mb, created_at
+       FROM system_metrics ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(maxPoints) as {
+    host_cpu_pct: number;
+    host_mem_used_mb: number;
+    host_mem_total_mb: number;
+    process_cpu_pct: number;
+    process_rss_mb: number;
+    created_at: number;
+  }[];
+
+  return rows.reverse().map((r) => ({
+    createdAt: r.created_at,
+    hostCpuPct: r.host_cpu_pct,
+    hostMemUsedMb: r.host_mem_used_mb,
+    hostMemTotalMb: r.host_mem_total_mb,
+    processCpuPct: r.process_cpu_pct,
+    processRssMb: r.process_rss_mb
+  }));
+}

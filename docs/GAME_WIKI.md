@@ -20,6 +20,7 @@
 | 2026-09-12 | เพิ่ม Telemetry Dashboard (`GET /api/admin/telemetry/dashboard` + `GET /api/admin/telemetry/summary`, auth: `ADMIN_SECRET`) แก้ risk #25 — ระหว่างทดสอบพบ stored-XSS ในตาราง error ของ dashboard (draft แรกใช้ `innerHTML` render ค่าจาก endpoint ที่ไม่มี auth) แก้เป็น `textContent` ทันที + เพิ่ม category/event_type whitelist validation ที่ ingest endpoint เป็นชั้นป้องกันที่สอง — ดู §5.7.1 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | หลัง deploy รอบแรกของ dashboard เปิดหน้าไม่ได้จริง — root cause: route เดิม `/admin/telemetry` อยู่นอก `/api/` ที่ nginx proxy มา Node เลยโดน SPA catch-all ของ game client เสิร์ฟหน้า login แทนเงียบๆ ย้าย route มาเป็น `/api/admin/telemetry/dashboard` แทน ไม่ต้องแก้ nginx | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | เพิ่ม `location /admin/` block ใหม่ใน nginx site config บน production (mirror `/api/` เดิม) แล้วย้าย dashboard route กลับมาที่ `/admin/telemetry` ตามที่ user ต้องการ (URL สะอาดกว่า) เพิ่ม risk ใหม่ #26 (nginx config ไม่ได้อยู่ใน git) | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | ทำ dashboard เป็นภาษาไทยเป็นหลัก (ตรวจ `I18n.ts`/`classes.ts`/`HUD.ts` ก่อนแปล ใช้คำเดิมที่เกมมีอยู่แล้วสำหรับ outcome, บัญญัติคำใหม่เฉพาะ rarity ที่เกมเองก็ไม่มีคำไทย) + เพิ่มระบบ System Metrics (CPU/RAM ทั้ง host และ process ใหม่ทั้งหมด — ดู §5.7.2) พบและแก้ edge case จาก unit test: `computeProcessCpuPercent()` return `null` ผิดตอน delta เวลาเป็นศูนย์ ทำแถวทั้งแถวหายไปทั้งที่ข้อมูลอื่นวัดได้ปกติ | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 
 ## สารบัญ
 
@@ -758,6 +759,36 @@ dashboard เห็น `<img>` tag render ตรงๆ ไม่ใช่ text �
 whitelist ที่ `server.ts`'s ingest endpoint ปฏิเสธ category/event_type ที่ไม่อยู่ใน enum จริง
 (defense-in-depth ชั้นที่สอง กันไม่ให้ค่าแปลกๆ เข้า DB เลย ไม่ต้องพึ่งแค่การ render ฝั่ง client ให้ถูก)
 
+### 5.7.2 System Metrics (CPU/RAM)
+
+ที่มา: `src/server/telemetry/systemMetrics.ts` (ใหม่), เพิ่ม field ใน `telemetryQueries.ts`
+
+`SystemMetricsSampler` เก็บ CPU/RAM ทั้งระดับ **host (ทั้ง VPS)** และ **process (แค่
+`game-server` เอง)** ทุก 30 วิ (`SYSTEM_METRICS_INTERVAL_MS`, `server.ts`) เขียนตรงลงตาราง
+`system_metrics` ใหม่ใน `telemetry.db` **ไม่ผ่าน `TelemetryBuffer`** เหมือน `game_events`/
+`error_log` — เพราะความถี่ต่ำมาก (1 ครั้ง/30 วิ ไม่ใช่ 25Hz) insert ตรงแบบ synchronous ไม่กระทบ
+performance เลย
+
+**วิธีคำนวณ**:
+- Host CPU % — diff ของ `os.cpus()[].times` ระหว่าง 2 รอบ sample (`idle`/`total` time delta) —
+  ต้องมี baseline รอบก่อนหน้าก่อนถึงจะคำนวณได้ (รอบแรกหลัง server เริ่มจะยังไม่มีข้อมูล ไม่เขียนแถว)
+- Process CPU % — diff ของ `process.cpuUsage()` (user+system microseconds) หารด้วยเวลาที่ผ่านไป
+  จริง — ต่างจาก host ตรงที่มี baseline ตั้งแต่ constructor แล้ว (ไม่ต้องรอรอบแรก) แต่ยังมี edge case
+  ที่พบจาก unit test: เรียกถี่กว่าความละเอียดของ `Date.now()`/`os.cpus()` (เช่นสองครั้งในมิลลิวินาที
+  เดียวกัน) จะได้ delta เป็นศูนย์ — เดิม return `null` ทำให้แถวทั้งแถวถูกข้ามไปเงียบๆ ทั้งที่ host
+  CPU/RAM ยังวัดได้ปกติ แก้เป็น return `0` แทน (มี baseline จริง แค่ยังไม่มีเวลาผ่านไปพอจะวัด ไม่ใช่
+  "ไม่มีข้อมูล")
+- Memory — `os.totalmem()/os.freemem()` (host), `process.memoryUsage().rss` (process) หน่วย MB
+
+**Dashboard**: section ใหม่ "🖥️ สุขภาพเซิร์ฟเวอร์" ใน `/admin/telemetry` — stat card 4 ใบ (ค่าล่าสุด)
++ line chart 2 อัน (CPU ตามเวลา, RAM ตามเวลา — RAM ใช้ dual y-axis เพราะ host กับ process หน่วยต่างกัน
+มาก เช่น 8000MB vs 60MB) มี empty-state ถ้ายังไม่มี sample เลย (รอ 30 วิแรกหลัง deploy/restart)
+
+**API**: field `system` ใหม่ใน `GET /api/admin/telemetry/summary` เดิม (ไม่แยก endpoint ใหม่) —
+`getSystemMetricsSeries()` คืนค่าย้อนหลังสูงสุด 500 sample (default) เรียงเก่า→ใหม่พร้อมใช้กับ chart
+ได้ตรงๆ (~4 ชม. ที่ interval 30 วิ) ไม่มี retention/prune บนตารางเองเหมือน `game_events`/`error_log`
+เดิม (risk เดียวกัน — ดู #24)
+
 ### 5.8 Stability Risk — Telemetry & Error Logging System
 
 - ✅ **ลดความเสี่ยงแล้ว (2026-09-11, risk audit หลังพัฒนา)** — ~~🟡 กลาง — `/api/telemetry/events`/`/errors` ไม่มี auth เลย~~: ยังไม่มี auth ตามที่ตั้งใจไว้ (สอดคล้องกับ `/api/grant-gold`) แต่เพิ่ม `isTelemetryRateLimited()` (40 req/60วิ ต่อ IP, `server.ts`) เป็นชั้นป้องกันที่สอง คู่กับ per-request cap เดิม — ทดสอบแล้วว่า request ที่ 41+ ใน 60 วิ โดน `429` จริง (curl loop 45 ครั้ง: 40×200, 5×429)
@@ -810,7 +841,7 @@ whitelist ที่ `server.ts`'s ingest endpoint ปฏิเสธ category/ev
 16. สองระบบคำศัพท์คู่ขนาน rarity string vs tier letter (§4.7) — ยังไม่แก้
 17. Duplicated "หา nearest player" logic ใน boss abilities 4 จุด (§3.7) — ยังไม่แก้
 18. vaultInventory ไม่มี cap (§2.6) — ยังไม่แก้
-24. `telemetry.db` ไม่มี retention/prune policy (§5.8) — ตั้งใจไม่ทำตอนนี้ (friend-testing scale) — ยังไม่แก้
+24. `telemetry.db` ไม่มี retention/prune policy (§5.8, ครอบคลุมทั้ง `game_events`/`error_log`/`system_metrics` ใหม่) — ตั้งใจไม่ทำตอนนี้ (friend-testing scale) — ยังไม่แก้
 25. ~~ไม่มี dashboard อ่าน telemetry~~ (§5.7.1) — **✅ แก้แล้ว 2026-09-12**: `GET /admin/telemetry` + `GET /api/admin/telemetry/summary` (auth: `ADMIN_SECRET`) — ระหว่างทำพบ stored-XSS ใน draft แรก แก้แล้ว, ระหว่าง deploy พบว่าเปิดไม่ได้จริงเพราะ nginx ไม่ proxy `/admin/` มา Node (แก้ชั่วคราวด้วย `/api/` ก่อน) สุดท้ายเพิ่ม `location /admin/` ใหม่ใน nginx site config แล้วย้าย route กลับมาที่ `/admin/telemetry` ตามเดิม (ดู §5.7.1 + risk ใหม่ #26)
 26. **nginx site config ไม่ได้อยู่ใน git repo** (§5.7.1, ใหม่) — `location /admin/` block ที่เพิ่งเพิ่ม (และ `/ws`/`/api/` เดิม) อยู่แค่บน production filesystem เท่านั้น (`/etc/nginx/sites-available/default`) ไม่มีใน version control เลย ถ้า server ถูกสร้างใหม่หรือ config ถูก revert จะทำให้ dashboard (และฟีเจอร์อื่นที่ผูกกับ nginx routing) พังแบบเงียบๆ อีกโดยไม่มีการแจ้งเตือน — ยังไม่แก้ (ควรพิจารณาเก็บ nginx config ไว้ใน repo เป็นเอกสารอ้างอิงอย่างน้อย)
 

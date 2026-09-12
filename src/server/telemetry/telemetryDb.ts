@@ -55,6 +55,17 @@ const SCHEMA_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_error_log_status   ON error_log(status);
   CREATE INDEX IF NOT EXISTS idx_error_log_category ON error_log(category);
+
+  CREATE TABLE IF NOT EXISTS system_metrics (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    host_cpu_pct      REAL NOT NULL,
+    host_mem_used_mb  INTEGER NOT NULL,
+    host_mem_total_mb INTEGER NOT NULL,
+    process_cpu_pct   REAL NOT NULL,
+    process_rss_mb    INTEGER NOT NULL,
+    created_at        INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_system_metrics_created ON system_metrics(created_at);
 `;
 
 /** Opens (and schema-initializes) a telemetry SQLite connection. Exported — not just used for

@@ -20,6 +20,7 @@
 | 2026-09-12 | เพิ่ม Telemetry Dashboard (แก้ Roadmap #25) — พบและแก้ stored-XSS จริงระหว่างทดสอบ (draft แรก render error message ผ่าน `innerHTML`) เพิ่ม Known Design Decision เรื่อง `ADMIN_SECRET` แยกจาก `JWT_SECRET` | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | Dashboard เปิดไม่ได้หลัง deploy จริง — route เดิมอยู่นอก `/api/` ที่ nginx proxy มา Node เลยโดน SPA catch-all ของ game client เสิร์ฟหน้า login แทนเงียบๆ ย้าย route เป็น `/api/admin/telemetry/dashboard` | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | เพิ่ม `location /admin/` block ใน nginx site config บน production ตามที่ user ขอ (URL สะอาดกว่า) ย้าย dashboard route กลับมาที่ `/admin/telemetry` เพิ่ม Roadmap #26 (nginx config ไม่ได้อยู่ใน git) | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | Dashboard เป็นภาษาไทยเป็นหลัก (ตรวจโค้ดเกมก่อนแปลให้ตรงของเดิม) + เพิ่มระบบ System Metrics (host/process CPU/RAM, entity ใหม่ `system_metrics` — B.4) พบ edge case จาก unit test ใน `computeProcessCpuPercent()` แก้แล้ว (ดู GAME_WIKI.md §5.7.2) | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 >
 > สร้างเมื่อ 2026-09-11
 
@@ -286,6 +287,9 @@ erDiagram
   `event_type`, `payload` (TEXT, JSON.stringify ต่อ event_type — ดู GAME_WIKI.md §5.7)
 - `error_log` — unique ด้วย `signature_hash` เท่านั้น ไม่มี FK ไปที่ entity อื่นเลย (`source`/`category`
   เป็น string ล้วน) — ดู GAME_WIKI.md §5.7 สำหรับ dedup logic เต็ม
+- `system_metrics` (ใหม่ 2026-09-12) — ไม่ผูกกับ run/player เลย เป็น time-series ล้วน (host+process
+  CPU/RAM ทุก 30 วิ) เขียนตรงไม่ผ่าน `TelemetryBuffer` (ความถี่ต่ำพอที่ synchronous insert ไม่กระทบ
+  performance) — ดู GAME_WIKI.md §5.7.2
 
 ---
 

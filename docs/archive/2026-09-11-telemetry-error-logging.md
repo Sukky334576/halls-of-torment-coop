@@ -277,3 +277,56 @@ nginx site config (`/etc/nginx/sites-available/default`) **ไม่ได้อ
 `GAME_WIKI.md` (§5.7.1 แก้ URL กลับเป็น `/admin/telemetry` + อธิบาย nginx block ใหม่, risk #25
 อัปเดต + risk #26 ใหม่, §5.8 เพิ่ม bullet nginx-not-in-git, Change Log), `GAME_BLUEPRINT.md`
 (Roadmap #25 อัปเดต + #26 ใหม่, Change Log)
+
+---
+
+## Round 4 — Thai-primary dashboard + System Metrics (CPU/RAM) (2026-09-12)
+
+### ส่วนที่ 1: แปล dashboard เป็นภาษาไทยเป็นหลัก
+
+User ขอให้ dashboard เป็นภาษาไทยเป็นหลัก + "ชื่อขอเป็นชื่อที่ไม่ใช่ตัวแปร" (ค่าที่โชว์เป็น raw
+snake_case/enum เช่น `monster_contact`, `wave_reached` ต้องแปลเป็นข้อความอ่านง่าย) — ก่อนแปล ส่ง
+agent ไปตรวจโค้ดเกมจริงก่อน (`I18n.ts`, `classes.ts`, `HUD.ts`) เพื่อใช้คำเดียวกับที่เกมมีอยู่แล้ว
+ไม่ใช่บัญญัติศัพท์ใหม่ทับของเดิม พบว่า:
+- **ผลจบเกม** (wipe/surrender/victory/boss_enrage_execute) มีคำไทยจริงในเกม (`I18n.ts`'s
+  `gameover.*` keys ที่ `HUD.ts` ใช้จริง) — ใช้คำย่อจากของจริงตรงๆ
+- **ชื่อมอนสเตอร์**/**rarity tier** ไม่มีคำไทยในเกมเลยสักที่ (เกมเองก็โชว์ raw English แม้อยู่โหมด
+  ไทย) — user บอกให้ใช้ดุลพินิจ ("อันไหนแปลไทยได้ก็แปล ถ้าแปลแล้วแปลกๆก็ไม่ต้อง") จึงคงชื่อมอนสเตอร์
+  เป็นอังกฤษ (ไม่บัญญัติศัพท์ใหม่ที่เกมไม่เคยใช้) ส่วน rarity แปลให้เพราะเป็นคำทั่วไปที่แปลได้ลื่น
+  แต่ใส่วงเล็บอังกฤษกำกับไว้เพื่อ cross-reference กับ `TRAIT_POOL`
+
+### ส่วนที่ 2: เพิ่มระบบ System Metrics
+
+User ถามว่าเก็บสถิติ CPU/RAM เป็นกราฟได้ไหม — crack requirement ก่อน: เลือก "ทั้งสองอย่าง" (host VPS
++ process ของ game-server เอง) แสดงเป็น section ใหม่ในหน้า dashboard เดิม
+
+**Fix ที่ทำ**: `src/server/telemetry/systemMetrics.ts` (`SystemMetricsSampler` ใหม่ — คำนวณ host CPU%
+จาก `os.cpus()` diff, process CPU% จาก `process.cpuUsage()` diff, memory จาก
+`os.totalmem/freemem`/`process.memoryUsage().rss`) sample ทุก 30 วิ เขียนตรงลง `system_metrics`
+table ใหม่ (ไม่ผ่าน `TelemetryBuffer` — ความถี่ต่ำพอ) เพิ่ม field `system` ใน
+`/api/admin/telemetry/summary` เดิม + section ใหม่ในหน้า dashboard (4 stat card + line chart 2 อัน,
+RAM ใช้ dual y-axis)
+
+**🐛 พบบั๊กจริงจาก unit test**: `computeProcessCpuPercent()` เดิม return `null` เมื่อ elapsed time
+เป็น 0 (สองคอลติดกันในมิลลิวินาทีเดียวกัน) ทำให้ `sampleOnce()` ข้ามทั้งแถวไปเงียบๆ ทั้งที่ host
+CPU/RAM ยังวัดได้ปกติ — เทสยิง `sampleOnce()` ติดกัน 3 ครั้งแล้วพัง (`rows` ว่าง) เจอ 2 ชั้น: (1)
+`computeProcessCpuPercent()` เองมี baseline จริงตั้งแต่ constructor ไม่ควร return null เมื่อ elapsed
+เป็นศูนย์ — แก้เป็น return `0` แทน (2) `os.cpus()`'s counter อัปเดตแค่ตาม OS tick granularity
+(~10ms+) — เทสเรียกติดกันแบบ synchronous ไม่มีเวลาจริงผ่านไปให้ counter เปลี่ยนเลย ไม่ใช่บั๊ก แค่
+เทสต้อง await จริงระหว่างคอล (แก้เทสให้ `await wait(30)` ระหว่างแต่ละ `sampleOnce()` แทนที่จะ loosen
+assertion)
+
+### Test
+
+- `npx tsc --noEmit` ✅, `npx vitest run` ✅ **78/78** (เพิ่ม 3 test `SystemMetricsSampler` + 2 test
+  `getSystemMetricsSeries`)
+- `npm run build` ✅
+- Manual E2E: รัน dev server จริง รอ sample จริง 2 รอบ (~35 วิ) ยืนยันแถวจริงใน `system_metrics`
+  (`hostCpuPct: 28.1, hostMemUsedMb: 8111/8192, processCpuPct: 0.2, processRssMb: 67` — ค่าสมเหตุสมผล
+  ทั้งหมด) เปิด dashboard จริงเห็น stat card + chart แสดงผลถูกต้อง รวมถึง empty-state ก่อน sample แรก
+  มาถึง
+
+### เอกสารที่อัปเดต
+
+`GAME_WIKI.md` (§5.7.2 ใหม่ทั้งหมด, risk #24 ขยายให้ครอบคลุม `system_metrics`, Change Log),
+`GAME_BLUEPRINT.md` (B.4 entity ใหม่ `system_metrics`, Change Log)

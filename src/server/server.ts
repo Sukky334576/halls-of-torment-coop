@@ -11,7 +11,8 @@ import { createUser, findUserByUsername, findUserById, getProgression, setProgre
 import { hashPassword, verifyPassword, signToken, verifyToken, isRateLimited, USERNAME_RE, MIN_PASSWORD_LENGTH } from './auth';
 import { logGameEvent, logError, shutdownTelemetry } from './telemetry/TelemetryBuffer';
 import { telemetryDb } from './telemetry/telemetryDb';
-import { getEventSummary, getErrorSummary } from './telemetry/telemetryQueries';
+import { getEventSummary, getErrorSummary, getSystemMetricsSeries } from './telemetry/telemetryQueries';
+import { SystemMetricsSampler } from './telemetry/systemMetrics';
 import { SERVER_BUILD_VERSION } from './telemetry/buildVersion';
 import type { GameEventType, ErrorCategory } from '../shared/telemetryTypes';
 import fs from 'fs';
@@ -520,12 +521,19 @@ function requireAdminSecret(req: http.IncomingMessage, res: http.ServerResponse)
   return false;
 }
 
+// 30s cadence: frequent enough to see a trend on the dashboard chart, far below anything that
+// could matter for load (one plain SELECT+INSERT every 30s, nowhere near the 25Hz tick path).
+const SYSTEM_METRICS_INTERVAL_MS = 30_000;
+const systemMetricsSampler = new SystemMetricsSampler(telemetryDb);
+systemMetricsSampler.start(SYSTEM_METRICS_INTERVAL_MS);
+
 function handleTelemetrySummary(req: http.IncomingMessage, res: http.ServerResponse) {
   if (!requireAdminSecret(req, res)) return;
   sendJson(res, 200, {
     success: true,
     events: getEventSummary(telemetryDb),
-    errors: getErrorSummary(telemetryDb)
+    errors: getErrorSummary(telemetryDb),
+    system: getSystemMetricsSeries(telemetryDb)
   });
 }
 
@@ -678,6 +686,7 @@ process.on('unhandledRejection', (reason) => {
 
 process.on('SIGTERM', () => {
   console.log('🛑 SIGTERM received — flushing telemetry before exit');
+  systemMetricsSampler.stop();
   shutdownTelemetry();
   process.exit(0);
 });
