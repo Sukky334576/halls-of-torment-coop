@@ -26,6 +26,7 @@
 | 2026-09-12 | พบและแก้ bug จาก user report: dashboard โชว์หน้ากรอก `ADMIN_SECRET` แว๊บก่อนทุกครั้งที่ refresh แม้ล็อกอินไว้แล้ว — root cause: `#gate` ไม่ `hidden` เป็นค่าเริ่มต้น, JS ซ่อนได้แค่หลัง `fetchSummary()` async resolve แก้ด้วย synchronous localStorage check ทันทีที่ parser มาถึง element — ดู GAME_WIKI.md §5.7.1 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | พบ gap เพิ่มเติมระหว่าง verify bug ข้างบน: `vite.config.ts` ไม่เคยมี proxy rule ให้ `/admin/` เลย (ตอนแก้ nginx production ก่อนหน้าไม่ได้แก้ dev config คู่กัน) ทำให้ local dev ตกไปที่ SPA fallback เหมือน nginx bug เดิม เพิ่ม `/admin` proxy ใน vite dev server mirror `/api/` เดิม — ดู GAME_WIKI.md §5.7.1 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | เพิ่ม stage filter บน dashboard (dropdown ด่าน 1-3/ทุกด่าน) — user เตือนว่าเกมมี 3 ด่านความยากต่างกันมาก รวมสถิติข้ามด่านทำให้ตีความผิด `getEventSummary()`/`getCardPickStats()` รับ `stageId?` ใหม่, `?stage=` query param ใหม่ใน `GET /api/admin/telemetry/summary` — system health/error log ตั้งใจไม่กรองตามด่าน — ดู GAME_WIKI.md §5.7.5 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | พบและแก้ bug จาก user report: การ์ด card-stats/error-table ติดกันไม่มีช่องว่าง — ทั้งคู่เป็น direct child `.card` ของ `#dashboard` ไม่ได้ห่อในกริดเหมือนการ์ดอื่น เลยไม่ได้ spacing จาก grid gap แก้ด้วย scoped CSS `#dashboard > .card { margin-bottom: 20px; }` — ดู GAME_WIKI.md §5.7 Change Log | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 >
 > สร้างเมื่อ 2026-09-11
 

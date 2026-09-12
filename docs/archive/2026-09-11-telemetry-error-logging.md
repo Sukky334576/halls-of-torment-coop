@@ -550,3 +550,32 @@ logic เพิ่ม หัวข้อ "สถิติการเล่น�
 
 `GAME_WIKI.md` (§5.7.1 เพิ่มหมายเหตุ gate-flash + vite proxy gap, §5.7.5 ใหม่ Stage Filter, Change
 Log), `GAME_BLUEPRINT.md` (Change Log), archive spec นี้ (Round 7 ใหม่)
+
+## Round 8 — การ์ด card-stats/error-table ติดกัน (2026-09-12, ต่อจาก Round 7)
+
+User รายงานบั๊กสด: "ทำไม สถิติการเลือกการ์ด กับ Error ที่เจอบ่อยที่สุด มันติดกัน"
+
+**Root cause**: `admin/telemetry-dashboard.html` มีการ์ด `.card` 2 ใบนี้เป็น **direct child ของ
+`#dashboard` ตรงๆ** ไม่เหมือนการ์ดอื่นทั้งหมดในหน้าที่ถูกห่อไว้ใน `.grid--stats`/`.grid--charts`
+เสมอ — spacing ระหว่างการ์ดปกติมาจาก grid's `gap: 16px` (แนวนอน+แนวตั้ง) และ
+`.grid--stats`/`.grid--charts` เองมี `margin-bottom: 20px` คั่นระหว่าง section แต่การ์ดทั้งสองใบนี้
+เป็น sibling ธรรมดา ไม่มีอะไรคั่นเลยแม้แต่ pixel เดียว (มีแค่ border 1px ของแต่ละใบที่แยกให้เห็นขอบ
+ต่างกัน) — ยืนยันด้วย `getBoundingClientRect()` จริง: `gapBetweenCard1And2` ก่อนแก้ = 0
+
+**แก้**: เพิ่ม CSS rule `#dashboard > .card { margin-bottom: 20px; }` — เลือก selector แบบ
+child-combinator (`>`) เจาะจงเพราะการ์ดอื่นทั้งหมดในหน้าซ้อนอยู่ในกริดอีกชั้น (ไม่ใช่ direct child
+ของ `#dashboard`) จึงไม่ตรงกับ selector นี้ ไม่มีความเสี่ยง double-spacing ทับกับ grid `gap` เดิมที่
+section อื่น ค่า 20px เลือกให้ตรงกับ `margin-bottom` ที่ `.grid--stats`/`.grid--charts` ใช้อยู่แล้ว
+เพื่อให้จังหวะห่างระหว่าง section สม่ำเสมอกันทั้งหน้า
+
+### Test
+
+- `npx tsc --noEmit` ✅
+- Manual verify ผ่าน `localhost:3000` (real vite dev proxy): `getBoundingClientRect()` วัดจริงก่อน/
+  หลังแก้ — ก่อนแก้ gap = 0, หลังแก้ gap = 20px ตรงตาม `margin-bottom` ที่ตั้งไว้ (Browser pane อยู่
+  ในสถานะ hidden ระหว่างทดสอบรอบนี้เหมือนที่เคยเจอใน Round 6 — screenshot ว่างเปล่า จึง verify ด้วย
+  DOM measurement แทนตามที่เคยทำได้ผลมาก่อน)
+
+### เอกสารที่อัปเดต
+
+`GAME_WIKI.md` (§5.7 Change Log), `GAME_BLUEPRINT.md` (Change Log), archive spec นี้ (Round 8 ใหม่)
