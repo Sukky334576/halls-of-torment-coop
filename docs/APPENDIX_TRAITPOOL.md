@@ -8,6 +8,7 @@
 |---|---|---|
 | 2026-09-11 | สร้างเอกสารครั้งแรก (TRAIT_POOL ครบ 70 ใบ + probability derivation 2 ระดับ + Monte Carlo simulation) | คำสั่ง user: เติม APPENDIX_TRAITPOOL.md ให้ครบตาม GAME_BLUEPRINT.md |
 | 2026-09-12 | อัปเดต `magnet_1`'s apply() effect — เพิ่ม `expMultiplier` (GAME_WIKI.md §4.7 risk #27) | `docs/archive/2026-09-12-card-description-mismatch-fix.md` |
+| 2026-09-12 | (ประวัติ) การไม่ตรงกันของ 5 ใบข้างต้นถูกพบครั้งแรกจาก session `card-list-documentation` ระหว่างทำ `docs/card-list.md` — ดูตารางเปรียบเทียบ before/after เต็มที่นั่น | `docs/card-list.md` |
 >
 > วิธีสร้างเอกสารนี้: เขียนสคริปต์ `dump-traitpool.ts` (ลบทิ้งหลังใช้งานแล้ว) `import { TRAIT_POOL, getPowerTier } from './src/shared/classes.ts'` จริง แล้ว dump ทุก field ของทุกใบ (`id`, `rarity`, `tier` จาก `getPowerTier()` จริง, `targetClass`, `isSignature`, `isEvolution`, และ source ของฟังก์ชัน `apply` ผ่าน `.toString()`) — ไม่ได้พิมพ์ตารางด้วยมือจาก source โดยตรง เพื่อกันการอ่านพลาด/ข้ามใบ ผลลัพธ์ยืนยัน **70 ใบจริง** (`TOTAL 70` จาก script) ตรงกับ GAME_WIKI.md §4.2
 >
