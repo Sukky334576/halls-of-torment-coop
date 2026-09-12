@@ -1461,8 +1461,13 @@ export const TRAIT_POOL: TraitOption[] = [
     id: 'commando_ap_rounds',
     name: 'Armor Piercing 5.56mm',
     thaiName: 'กระสุนเจาะเกราะ 5.56 มม.',
-    description: 'M4A1 rounds pierce through additional enemies (+2 Pierce) and gain +15% damage bonus.',
-    thaiDesc: 'กระสุนปืนไรเฟิลทะลวงศัตรูเพิ่มขึ้น (+2 ทะลุ) และเพิ่มพลังโจมตี +15%',
+    // 2026-09-12: description said +2 Pierce flat — actual formula (GameRoom.ts, pierce = 2 +
+    // apRoundsRank) is +1 per rank. Correcting the description rather than the formula: a real
+    // +2/rank would push rank-3 pierce to 8 (base 2 + 6), well past comparable pierce cards
+    // elsewhere (e.g. Archer's Deadeye Pierce tops out lower) for a class that already gets
+    // pierce "for free" via its 3-round burst.
+    description: 'M4A1 rounds pierce through an additional enemy per rank (+1 Pierce) and gain +15% damage bonus.',
+    thaiDesc: 'กระสุนปืนไรเฟิลทะลวงศัตรูเพิ่มขึ้นต่อขั้น (+1 ทะลุ) และเพิ่มพลังโจมตี +15%',
     rarity: 'rare',
     icon: '🎯',
     targetClass: PlayerClass.COMMANDO,
@@ -1572,8 +1577,13 @@ export const TRAIT_POOL: TraitOption[] = [
     id: 'cowboy_quick_draw',
     name: 'Quick Draw Fanning',
     thaiName: 'สะบัดไกยิงไว',
-    description: 'Fanning technique increases attack speed by +25% and reduces weapon cooldown by 15%.',
-    thaiDesc: 'เทคนิคสับนกสะบัดไก เพิ่มความเร็วโจมตี +25% และลดคูลดาวน์อาวุธ 15%',
+    // 2026-09-12: description described attack speed and cooldown reduction as two separate
+    // effects, but apply() only ever touched attackSpeed — and attackSpeed already IS what
+    // shortens the effective cooldown (resetAttackCooldown(): attackCooldown = weaponCooldown /
+    // attackSpeed, ServerPlayer.ts). There was never a second mechanism; the old wording just
+    // restated the same +25% attack speed as a fictional extra "-15% cooldown" line.
+    description: 'Fanning technique increases attack speed by +25%.',
+    thaiDesc: 'เทคนิคสับนกสะบัดไก เพิ่มความเร็วโจมตี +25%',
     rarity: 'rare',
     icon: '⚡',
     targetClass: PlayerClass.COWBOY,
@@ -1771,8 +1781,12 @@ export const TRAIT_POOL: TraitOption[] = [
     id: 'gambler_fortune_greed',
     name: 'Golden Fortune Aura',
     thaiName: 'ออร่าดวงมหาเศรษฐี',
-    description: 'Increases Soul Coin drops by +35%, pickup range by +30%, and critical strike chance by +10%.',
-    thaiDesc: 'เพิ่มอัตราดรอปเหรียญวิญญาณ +35%, เพิ่มระยะดูดเก็บของ +30%, และเพิ่มโอกาสติดคริติคอล +10%',
+    // 2026-09-12: description used to promise a flat +35% base gold-drop-rate boost with no
+    // code behind it at all (GOLD_DROP_CHANCE, constants.ts, is a global constant no card has
+    // ever hooked into) — rewritten to describe the real mechanism (a per-card-hit bonus coin
+    // chance, GameRoom.ts's GAMBLER_CARD hit handler) now that rank actually scales it.
+    description: '+3.5% chance per rank for razor cards to drop a bonus Soul Coin on hit, +30% pickup range, and +10% critical strike chance.',
+    thaiDesc: 'ไพ่สังหารมีโอกาส +3.5% ต่อขั้น ที่จะดรอปเหรียญวิญญาณโบนัสเมื่อโดนศัตรู, เพิ่มระยะดูดเก็บของ +30%, และเพิ่มโอกาสติดคริติคอล +10%',
     rarity: 'rare',
     icon: '💰',
     targetClass: PlayerClass.GAMBLER,
@@ -1836,11 +1850,20 @@ export const TRAIT_POOL: TraitOption[] = [
     name: 'Soul Siphon Attunement',
     thaiName: 'แรงดึงดูดวิญญาณ (ระยะเก็บของ)',
     // D-tier: base 22% * TIER_POWER_MULTIPLIER.D (0.7) = 15.4% ≈ 15%
+    // 2026-09-12: EXP half of this comment's own design intent was never implemented (apply()
+    // only ever touched pickupRadius) — restored via docs/archive/2026-09-12-card-description-
+    // mismatch-fix.md. expMultiplier defaults undefined (PlayerStats, types.ts:242) when no
+    // skill tree passive has set it, so seed from 1.0 the same way ServerPlayer.initSkillTreeUnlocks
+    // does before adding this card's bonus — safe to stack additively across repeat picks
+    // (magnet_1 is a universal common card with no rank cap, like every other %-bonus stat here).
     description: '+15% EXP and Item Pickup Radius',
     thaiDesc: 'เพิ่มระยะการดูดเก็บ EXP และไอเทมบนพื้น +15%',
     rarity: 'common',
     icon: '🧲',
-    apply: (s) => { s.pickupRadius *= 1.15; }
+    apply: (s) => {
+      s.expMultiplier = (s.expMultiplier ?? 1.0) + 0.15;
+      s.pickupRadius *= 1.15;
+    }
   },
   {
     id: 'area_expansion_1',
