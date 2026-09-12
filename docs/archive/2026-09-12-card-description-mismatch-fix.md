@@ -80,7 +80,7 @@ rebase+merge ในอนาคต ให้ sync สถานะ "แก้แ�
   threshold เดิม/ใหม่ตรงกัน, rank 3 threshold ใหม่ทำงานจริง (roll ที่ old-3.5%-fail แต่
   new-10.5%-pass), rank 3 ยัง respect upper bound
 - `npx tsc --noEmit` ✅
-- `npx vitest run` ✅ 293/293 (285 เดิม + 8 ใหม่: 4 trait-fix + 4 gambler-coin-drop)
+- `npx vitest run` ✅ **⚠️ Correction (2026-09-12, พบจาก session `card-list-documentation`)**: ตอนเขียน spec นี้ครั้งแรกรายงานผิดเป็น "293/293" — สาเหตุจริงคือ **ไม่ใช่ typo แต่เป็นบั๊กของ tooling**: ตอนนั้นไม่มี `vitest.config.ts` เลย ทำให้ default exclude ของ vitest ไม่รู้จัก `.claude/worktrees/` (git worktree ของ session อื่นที่ทำงานขนานกันในโปรเจกต์เดียวกัน — เป็น full copy ของ repo รวม `*.test.ts`) `vitest run` จาก root เลย sweep เจอไฟล์ test ของทุก worktree ที่มีอยู่ ณ ตอนนั้นซ้ำเข้าไปด้วย ทำให้ตัวเลขพองและไม่คงที่ (293 → 311 เปลี่ยนไปมาตามจำนวน worktree ที่มีอยู่ตอนรัน) **ตัวเลขจริงคือ 93/93** (85 เดิม + 8 ใหม่ตามที่ตั้งใจ) แก้ต้นเหตุแล้วด้วย `vitest.config.ts` ใหม่ (`exclude: [...configDefaults.exclude, '.claude/**']`) — ยืนยันด้วย `vitest run` ให้ผล 93/93 คงที่ไม่ว่าจะมี worktree อื่นอยู่กี่ตัว
 - `npm run build` ✅
 
 ## เอกสารที่อัปเดต
