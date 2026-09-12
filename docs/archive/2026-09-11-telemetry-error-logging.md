@@ -398,3 +398,84 @@ root cause จริง: `telemetryDb.ts`'s module-level singleton
 
 `GAME_WIKI.md` (§5.7.2 หัวข้อเปลี่ยนเป็น "CPU/RAM/Disk", เพิ่มรายละเอียด disk/auto-refresh/schema
 migration/race-condition fix, Change Log), `GAME_BLUEPRINT.md` (Change Log)
+
+---
+
+## Round 6 — Feedback 3 ข้อ: ตัดกราฟดิสก์, card pick stats รายใบ, impeccable layout audit (2026-09-12)
+
+User ให้ feedback 3 ข้อพร้อมกันหลัง deploy รอบ disk/auto-refresh:
+1. "พื้นที่ดิสจำเป็นต้องทำเป็นกราฟหรอ" — ตั้งคำถามความจำเป็นของกราฟ trend สำหรับดิสก์
+2. อยากเปลี่ยน "อัตราการเลือกการ์ดตามความหายาก" (rarity aggregate) เป็นสถิติรายใบการ์ด พร้อมเหตุผล
+   ชัดเจน: "จะได้รู้ว่าการ์ดไหนคนไม่เล่นจะได้เอามาปรับสมดุล"
+3. "เอา impeccable มาเช็ค layout ... ทำเป็น component เพื่อให้สวยงามดูง่ายไม่แปลกตา"
+
+### 1. ตัดกราฟดิสก์ตามเวลา
+
+เอาออกเฉพาะ chart (`chart-disk-history`) เหลือแค่ stat card ค่าล่าสุด — เหตุผล: ดิสก์เปลี่ยนช้ากว่า
+CPU/RAM มาก (เป็นวัน/สัปดาห์ ไม่ใช่วินาที) กราฟ trend real-time ให้ข้อมูลน้อยกว่าตัวเลขปัจจุบันเดี่ยวๆ
+— data ที่ backend เก็บ (`disk_used_mb`/`disk_total_mb` ใน `system_metrics`) **ไม่ได้ตัดออก** แค่ไม่
+เอามาวาดกราฟ ถ้าอยากดู trend ย้อนหลังยังดึงจาก DB ได้ตรงๆ
+
+### 2. Card Pick Stats รายใบ (แทน rarity aggregate)
+
+`getCardPickStats()` ใหม่ (`telemetryQueries.ts`) — เดินผ่านทุก `level_up_choice` event, นับ
+`payload.offered[]` (เสนอ) เทียบกับ `payload.picked` (เลือก) ต่อ trait id แล้ว join กับ `TRAIT_POOL`
+เอาชื่อไทยจริง (`thaiName`) ไม่ใช่แค่ id เรียงผลลัพธ์จาก **อัตราเลือกน้อยสุดก่อน** (ตรงกับเป้าหมาย
+ของ user เป๊ะ: เห็นการ์ดที่ต้องปรับสมดุลอยู่บนสุดทันที) ตัดการ์ดที่ไม่เคยถูกเสนอเลยออก (ไม่ใช่ signal
+เดียวกับ "เสนอแล้วไม่มีใครเลือก") เขียน test 3 ข้อ (offered/picked count ถูกต้อง+ใช้ thaiName,
+sort ascending ถูก, กรอง unofferred card ถูก) ใช้ real `TRAIT_POOL` id จริง (`vitality_1`,
+`strength_1`) ไม่ใช่ id สมมติ กันเทสผ่านหลอกๆ เพราะ id ปลอมจะโดนกรองออกจริงอยู่ดี (ยืนยันจาก
+production code path เดียวกัน)
+
+### 3. Impeccable Layout Audit
+
+รัน `.claude/skills/impeccable/scripts/impeccable detect --scope layout` (ผลว่างทั้งก่อน-หลังแก้ —
+ยืนยันว่า mechanical scan อย่างเดียวจับ hierarchy/rhythm ไม่ได้ ต้องตรวจด้วยตา+วัด DOM จริงตามที่
+`layout.md` reference บอกไว้) ตรวจด้วยตา + วัด `getBoundingClientRect()`/`getComputedStyle()` จริง
+ผ่าน browser พบ 3 ปัญหาจริง ไม่ใช่แค่ความรู้สึก:
+
+1. **Grid wrap ไม่สม่ำเสมอ** — วัดจริง: section 4 การ์ด (overview) กับ section 5 การ์ด (system
+   health) ใช้ `.grid` เดียวกัน (`auto-fit, minmax(280px,1fr)`) ได้ 3 คอลัมน์เท่ากัน แต่ auto-fit
+   collapse-empty-track behavior ทำให้เศษ 1 ใบ stretch เต็มแถว ส่วนเศษ 2 ใบไม่ stretch เหลือช่องว่าง
+   — inconsistent จริง ไม่ใช่แค่ความรู้สึก แก้เป็น `.grid--stats`/`.grid--charts` แยกกัน fixed
+   column count ตาม breakpoint
+2. **Emoji เป็น icon system** — ตรงกับ craft-floor.md ban ตรงๆ ("Unicode glyphs or emoji standing
+   in for an icon system") ลบ 📈/🖥️/📊 ออกจาก section title ทั้ง 3 จุด เหลือ 🗡️ ที่ page title เดียว
+   (brand mark ตัวเดียว ไม่ใช่ icon system ที่วนซ้ำ — ตรวจแล้วว่า 🗡️ เป็นสัญลักษณ์ที่โปรเจกต์ใช้จริง
+   อยู่แล้วใน server log/pm2 output)
+3. **ตารางไม่มีขอบเขต** — ทดสอบยัด 70 แถวจำลองจริง (จำลอง scale เกมจริงที่มี TRAIT_POOL ~70 ใบ)
+   ยืนยันหน้ายาวขึ้นตรงตามจำนวนแถวจริง (ไม่มี cap) แก้ด้วย `.table-scroll`
+   (`max-height:420px; overflow-y:auto`) ครอบทั้งตาราง card-stats และ error log (สม่ำเสมอกัน)
+
+**🐛 พบและแก้บั๊กจริงระหว่างทำ sticky header**: ลอง `position: sticky` บน `<th>` ตอนแรกไม่ทำงาน
+(ยืนยันด้วย `getBoundingClientRect()` วัดจริงระหว่าง scroll เห็น thead เลื่อนตามเนื้อหา ไม่ค้างอยู่
+ที่เดิม) วินิจฉัยแล้วพบสาเหตุ: `table { border-collapse: collapse }` ทำให้ `position: sticky` บน
+`<th>` ใช้ไม่ได้จริงใน Chromium (known engine quirk, ไม่ใช่ typo — `getComputedStyle` ยืนยัน
+`position: sticky` ถูก apply จริงแต่ไม่มีผล) แก้เป็น `border-collapse: separate; border-spacing:0`
+แทน (มองด้วยตาเหมือนเดิมทุกอย่าง เพราะ border วาดต่อ cell อยู่แล้ว ไม่ได้พึ่ง collapsed border)
+
+**⚠️ ข้อจำกัดการ verify ที่ต้องบอกตรงๆ**: verify sticky-header ด้วยการ scroll จริง (ไม่ใช่แค่
+`getComputedStyle`) ไม่สำเร็จในรอบนี้ — Browser pane ที่ใช้ทดสอบอยู่ในสถานะ "hidden" ระหว่างช่วงนั้น
+(ยืนยันจาก error message ของ tool เอง: "The Browser pane is currently hidden. The page is not
+rendered while it is not displayed") ทำให้ scroll-linked repaint/`requestAnimationFrame` ไม่ทำงาน
+ระหว่างทดสอบ — ไม่ใช่หลักฐานว่าโค้ดพัง (fresh screenshot หลังจากนั้นยืนยันว่าหน้าเว็บ render ปกติทุก
+อย่าง ปัญหาอยู่ที่ scroll-gesture-in-hidden-pane เท่านั้น) แต่ก็ไม่ได้เห็นด้วยตาจริงว่า sticky ทำงาน
+ระหว่าง scroll จริงเช่นกัน — บอก user ตรงๆ ให้ลองเปิดหน้าจริงเช็คเองรอบแรกหลัง deploy ไม่ได้อ้างว่า
+"verify ครบแล้ว 100%" ทั้งที่มีข้อจำกัดนี้อยู่
+
+### Test
+
+- `npx tsc --noEmit` ✅, `npx vitest run` ✅ **83/83** รันซ้ำ 3 ครั้งไม่มี fail (เพิ่ม/แก้ test ใน
+  `telemetryQueries.test.ts`: ลบ test rarity เดิม, เพิ่ม 3 test `getCardPickStats`)
+- `npm run build` ✅
+- `impeccable detect --scope layout` ✅ ว่างทั้งก่อน-หลัง (mechanical scan อย่างเดียวไม่พอ ต้องตรวจตา
+  + วัด DOM จริงตามที่ reference บอก)
+- Manual E2E ผ่าน browser จริง: seed ข้อมูล card pick จริง (4 ใบ, อัตราเลือกต่างกัน) ยืนยันตารางแสดง
+  ชื่อไทยถูกต้อง เรียงจากน้อยสุดถูกต้อง, ยืนยัน grid consistency ที่ desktop/mobile (375px) ทั้งสอง
+  breakpoint, ยืนยัน scrollable container ทำงานจริงด้วยข้อมูลจำลอง 74 แถว (`isScrollable: true`,
+  หน้าโตแค่ +265px ไม่ใช่ +2000px)
+
+### เอกสารที่อัปเดต
+
+`GAME_WIKI.md` (§5.7.1 แก้คำอธิบาย summary endpoint, §5.7.2 ตัดกราฟดิสก์ + อธิบายเหตุผล, §5.7.3 ใหม่
+Card Pick Stats, §5.7.4 ใหม่ Layout Audit, Change Log), `GAME_BLUEPRINT.md` (Change Log)

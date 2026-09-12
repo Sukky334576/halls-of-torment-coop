@@ -11,7 +11,7 @@ import { createUser, findUserByUsername, findUserById, getProgression, setProgre
 import { hashPassword, verifyPassword, signToken, verifyToken, isRateLimited, USERNAME_RE, MIN_PASSWORD_LENGTH } from './auth';
 import { logGameEvent, logError, shutdownTelemetry } from './telemetry/TelemetryBuffer';
 import { telemetryDb } from './telemetry/telemetryDb';
-import { getEventSummary, getErrorSummary, getSystemMetricsSeries } from './telemetry/telemetryQueries';
+import { getEventSummary, getErrorSummary, getSystemMetricsSeries, getCardPickStats } from './telemetry/telemetryQueries';
 import { SystemMetricsSampler } from './telemetry/systemMetrics';
 import { SERVER_BUILD_VERSION } from './telemetry/buildVersion';
 import type { GameEventType, ErrorCategory } from '../shared/telemetryTypes';
@@ -533,7 +533,8 @@ function handleTelemetrySummary(req: http.IncomingMessage, res: http.ServerRespo
     success: true,
     events: getEventSummary(telemetryDb),
     errors: getErrorSummary(telemetryDb),
-    system: getSystemMetricsSeries(telemetryDb)
+    system: getSystemMetricsSeries(telemetryDb),
+    cardStats: getCardPickStats(telemetryDb)
   });
 }
 

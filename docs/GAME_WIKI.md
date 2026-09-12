@@ -22,6 +22,7 @@
 | 2026-09-12 | เพิ่ม `location /admin/` block ใหม่ใน nginx site config บน production (mirror `/api/` เดิม) แล้วย้าย dashboard route กลับมาที่ `/admin/telemetry` ตามที่ user ต้องการ (URL สะอาดกว่า) เพิ่ม risk ใหม่ #26 (nginx config ไม่ได้อยู่ใน git) | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | ทำ dashboard เป็นภาษาไทยเป็นหลัก (ตรวจ `I18n.ts`/`classes.ts`/`HUD.ts` ก่อนแปล ใช้คำเดิมที่เกมมีอยู่แล้วสำหรับ outcome, บัญญัติคำใหม่เฉพาะ rarity ที่เกมเองก็ไม่มีคำไทย) + เพิ่มระบบ System Metrics (CPU/RAM ทั้ง host และ process ใหม่ทั้งหมด — ดู §5.7.2) พบและแก้ edge case จาก unit test: `computeProcessCpuPercent()` return `null` ผิดตอน delta เวลาเป็นศูนย์ ทำแถวทั้งแถวหายไปทั้งที่ข้อมูลอื่นวัดได้ปกติ | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | เพิ่ม disk space เข้า System Metrics (`fs.statfsSync`) + auto-refresh 30 วิบน dashboard (หยุดตอนสลับแท็บ) — ต้อง migrate schema `system_metrics` ที่ deploy ไปแล้ว (`ensureColumn()` ใหม่) พบและแก้ **race condition จริงในชุด test ทั้งหมด** (ไม่ใช่แค่ feature นี้): module-level singleton เปิดไฟล์ dev DB จริงเป็น side effect ของการ import ชนกันข้าม vitest worker ได้ `database is locked` — เคยเข้าใจผิดว่าเป็น flake มาหลายรอบ | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | ตัดกราฟ "พื้นที่ดิสก์ตามเวลา" ออก (เหลือแค่ stat card — user ถามว่าจำเป็นไหม, ดิสก์เปลี่ยนช้า), เปลี่ยน "card pick rate ต่อ rarity" เป็นตารางแยกทีละใบการ์ดจริง (`getCardPickStats()` ใหม่ — ดู §5.7.3), รัน `/impeccable layout` แก้ grid wrap ไม่สม่ำเสมอ + ตัด emoji section-icon (craft-floor ban) + เพิ่ม scrollable table + sticky header (ดู §5.7.4) | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 
 ## สารบัญ
 
@@ -740,10 +741,10 @@ route ใหม่ใน `server.ts`
   **การ deploy ครั้งถัดไปต้องแน่ใจว่า nginx config บน production มี block นี้อยู่ด้วย ไม่ใช่แค่ pull
   โค้ดแอปอย่างเดียว** (ไฟล์ nginx ไม่ได้อยู่ใน git repo)
 - **`GET /api/admin/telemetry/summary`** — endpoint เดียวคืนสรุปทั้งหมด (event count ต่อ type, death
-  cause breakdown, wave distribution, card pick rate ต่อ rarity, run outcome breakdown, average
-  playtime, error summary) คำนวณจาก `getEventSummary()`/`getErrorSummary()`
-  (`telemetryQueries.ts`) — SELECT ธรรมดาแล้ว aggregate ใน JS ไม่ใช้ SQLite `json_extract()` เพราะ
-  ไม่การันตีว่า build ของ `better-sqlite3` มี JSON1 extension เปิดอยู่
+  cause breakdown, wave distribution, run outcome breakdown, average playtime, error summary,
+  card pick stats ต่อใบ — ดู §5.7.3) คำนวณจาก `getEventSummary()`/`getErrorSummary()`/
+  `getCardPickStats()` (`telemetryQueries.ts`) — SELECT ธรรมดาแล้ว aggregate ใน JS ไม่ใช้ SQLite
+  `json_extract()` เพราะไม่การันตีว่า build ของ `better-sqlite3` มี JSON1 extension เปิดอยู่
 - **Auth**: `ADMIN_SECRET` env var ใหม่ แยกจาก `JWT_SECRET` โดยสิ้นเชิง (ระบบ user ปัจจุบันไม่มี
   role/admin field เลย ไม่อยากผูกกับ player account) มี insecure dev-default + warning เหมือน
   `JWT_SECRET` ส่งผ่าน header `X-Admin-Secret` เก็บไว้ใน `localStorage` ฝั่ง browser หลัง submit
@@ -787,12 +788,14 @@ performance เลย
   `:memory:` DB ตอนเทส) หรือ platform ไม่รองรับ — ไม่ทำให้ sample ทั้งแถวพังเหมือนที่เคยเป็นปัญหากับ
   CPU ด้านบน
 
-**Dashboard**: section ใหม่ "🖥️ สุขภาพเซิร์ฟเวอร์" ใน `/admin/telemetry` — stat card 5 ใบ (ค่าล่าสุด:
-host CPU/RAM, process CPU/RAM, disk) + line chart 3 อัน (CPU ตามเวลา, RAM ตามเวลา — dual y-axis
-เพราะ host/process หน่วยต่างกันมาก, พื้นที่ดิสก์ตามเวลา %) มี empty-state ถ้ายังไม่มี sample เลย (รอ
-30 วิแรกหลัง deploy/restart) **Auto-refresh ทุก 30 วิ** (ตรงกับ sampler เอง — poll ถี่กว่านั้นก็ได้
-ข้อมูลซ้ำเดิม) **หยุด poll อัตโนมัติเมื่อสลับแท็บ** (`document.visibilitychange`) กันเปลืองตอนเปิด
-ค้างไว้ไม่ได้ดู แล้ว refetch ทันทีตอนกลับมาดูแท็บ (ไม่ต้องรอ tick ถัดไป)
+**Dashboard**: section ใหม่ "สุขภาพเซิร์ฟเวอร์" ใน `/admin/telemetry` — stat card 5 ใบ (ค่าล่าสุด:
+host CPU/RAM, process CPU/RAM, disk) + line chart 2 อัน (CPU ตามเวลา, RAM ตามเวลา — dual y-axis
+เพราะ host/process หน่วยต่างกันมาก) **⚠️ ตั้งใจไม่ทำกราฟ "พื้นที่ดิสก์ตามเวลา" แยก** (มีแค่ stat card
+ค่าล่าสุด) — user ถามตรงๆ ว่า "จำเป็นต้องทำเป็นกราฟหรอ" ตอบว่าไม่จำเป็นเพราะดิสก์เปลี่ยนช้ากว่า CPU/RAM
+มาก ดู trend แบบ real-time ไม่ค่อยมีประโยชน์เท่า มี empty-state ถ้ายังไม่มี sample เลย (รอ 30 วิแรก
+หลัง deploy/restart) **Auto-refresh ทุก 30 วิ** (ตรงกับ sampler เอง — poll ถี่กว่านั้นก็ได้ข้อมูลซ้ำเดิม)
+**หยุด poll อัตโนมัติเมื่อสลับแท็บ** (`document.visibilitychange`) กันเปลืองตอนเปิดค้างไว้ไม่ได้ดู
+แล้ว refetch ทันทีตอนกลับมาดูแท็บ (ไม่ต้องรอ tick ถัดไป)
 
 **API**: field `system` ใหม่ใน `GET /api/admin/telemetry/summary` เดิม (ไม่แยก endpoint ใหม่) —
 `getSystemMetricsSeries()` คืนค่าย้อนหลังสูงสุด 500 sample (default) เรียงเก่า→ใหม่พร้อมใช้กับ chart
@@ -816,6 +819,51 @@ flake" มาหลายรอบในเซสชันนี้ ก่อน
 vitest (เช็ค `process.env.VITEST` ที่ vitest set ให้อัตโนมัติ) — ไม่มี test ไหนใช้ singleton ตัวนี้
 โดยตรงอยู่แล้ว (ทุก test สร้าง connection ของตัวเองผ่าน `createTelemetryConnection(':memory:')`)
 ปัญหาคือแค่การ import module เฉยๆ ก็ trigger side effect นี้ไปแล้ว
+
+### 5.7.3 Card Pick Stats (แทนที่ card pick rate ต่อ rarity เดิม)
+
+ที่มา: `getCardPickStats()` ใหม่ใน `telemetryQueries.ts`
+
+**เปลี่ยนจาก**: pie chart รวมยอด pick ต่อ rarity tier (common/rare/epic/legendary/mythic) —
+**เป็น**: ตารางแยกทีละใบการ์ดจริง (ชื่อการ์ดจาก `TRAIT_POOL[...].thaiName`) พร้อม "เสนอกี่ครั้ง/เลือก
+กี่ครั้ง/อัตราเลือก %" เรียงจากอัตราเลือกน้อยสุดก่อน — user ขอเปลี่ยนเพราะอยากรู้ว่า **การ์ดใบไหน**
+(ไม่ใช่แค่ tier ไหน) ที่คนไม่ค่อยเลือก เพื่อเอาไปปรับสมดุลให้มีความสำคัญมากขึ้น สรุปยอด "เสนอ" จาก
+`payload.offered[]` เทียบกับ "เลือก" จาก `payload.picked` ของทุก `level_up_choice` event — การ์ดที่
+`timesOffered === 0` (ไม่เคยถูกเสนอเลย) ถูกตัดออกจากผลลัพธ์ เพราะ "ยังไม่มีข้อมูล" กับ "เสนอแล้วไม่มี
+ใครเลือก" เป็นคนละความหมายกัน ไม่ควรปนกัน
+
+Dashboard: table ใหม่ "สถิติการเลือกการ์ด" อยู่ใน `.table-scroll` (ดู §5.7.4) พร้อม color-code คอลัมน์
+อัตราเลือก (`.pick-low` แดง <15%, `.pick-high` เขียว ≥50%)
+
+### 5.7.4 Layout Audit (`/impeccable layout`)
+
+ที่มา: user ขอ "เอา impeccable มาเช็ค layout ... ทำเป็น component เพื่อให้สวยงามดูง่าย" — รัน
+mechanical scan (`impeccable detect --scope layout`, ผลว่าง ทั้งก่อนและหลังแก้) + ตรวจด้วยตาเอง +
+วัด DOM จริงผ่าน browser พบ 3 ปัญหาจริง แก้ครบ:
+
+1. **Grid wrap ไม่สม่ำเสมอ**: `.grid` เดิมใช้ `repeat(auto-fit, minmax(280px,1fr))` ตัวเดียวทั้ง
+   หน้า — section 4 การ์ด (เหลือ 1 ใบแถวสุดท้าย) กับ section 5 การ์ด (เหลือ 2 ใบ) ได้ผลลัพธ์
+   **ไม่เหมือนกัน**: 1 ใบ stretch เต็มแถว (auto-fit collapse track ว่าง), 2 ใบ เหลือช่องว่างข้างๆ ไม่
+   stretch — เป็น "framework default" ไม่ใช่ design ตั้งใจ แก้โดยแยกเป็น `.grid--stats` (fixed 4
+   คอลัมน์, breakpoint 2/1 ตาม viewport) กับ `.grid--charts` (fixed 2 คอลัมน์ — chart ต้องการพื้นที่
+   มากกว่า stat tile) ผลลัพธ์: สม่ำเสมอทุก section ไม่ว่าจะเหลือกี่ใบในแถวสุดท้าย
+2. **Emoji เป็น icon system**: 📈/🖥️/📊 หน้า section title ทั้ง 3 จุด ตรงกับ craft-floor ban ตรงๆ
+   ("Unicode glyphs or emoji standing in for an icon system") — ลบออก เหลือแค่ 🗡️ ที่ page title
+   (ใช้ครั้งเดียวเป็น brand mark ตามที่โปรเจกต์ใช้จริงอยู่แล้วใน server log/pm2 output ไม่ใช่ icon
+   system ที่วนซ้ำ)
+3. **ตารางยาวไม่มีขอบเขต**: `#card-stats-table` ไม่มี cap เลย — ในเกมจริงมีได้ถึง ~70 แถว (ทุกใบใน
+   `TRAIT_POOL` ที่เคยถูกเสนอ) จะทำให้หน้ายาวมากโดยไม่จำเป็น (ทดสอบยัด 70 แถวจำลองจริง หน้าเดิมจะยาว
+   ขึ้นตรงๆ ตามจำนวนแถว) แก้ด้วย `.table-scroll` (`max-height: 420px; overflow-y: auto;`) ครอบทั้ง
+   ตาราง card-stats และ error log (สม่ำเสมอกัน) + sticky header (`position: sticky` บน `<th>`
+   ร่วมกับ `border-collapse: separate` แทน `collapse` — `collapse` ทำให้ sticky บน `<th>` ใช้ไม่ได้
+   จริงใน Chromium เป็น known quirk) **⚠️ หมายเหตุความน่าเชื่อถือของการ verify**: ยืนยัน
+   `max-height`/`overflow-y` ทำงานจริงผ่านการวัด DOM ตรงๆ (`scrollHeight`/`clientHeight`) แต่ verify
+   sticky header ด้วยการ scroll จริงไม่สำเร็จในรอบนี้เพราะ Browser pane ที่ใช้ทดสอบอยู่ในสถานะ
+   "hidden" (ไม่ได้แสดงผลจริงให้ user เห็น) ทำให้ paint/scroll-linked reflow บางส่วนไม่ทำงานระหว่าง
+   ทดสอบ (ยืนยันจาก error message ของ tool เองว่า "page is not rendered while not displayed") —
+   `position: sticky` ยืนยันแล้วว่าถูก apply จริง (`getComputedStyle`) และเป็น pattern มาตรฐานที่
+   รองรับกว้างขวางร่วมกับ `border-collapse: separate` แต่ยังไม่ได้เห็นด้วยตาจริงว่า sticky ทำงาน
+   ระหว่าง scroll — ควรเช็คตอนเปิดหน้าจริงครั้งแรกหลัง deploy
 
 ### 5.8 Stability Risk — Telemetry & Error Logging System
 

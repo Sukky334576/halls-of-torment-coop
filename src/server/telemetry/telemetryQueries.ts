@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { TRAIT_POOL } from '../../shared/classes';
 
 /** Aggregation happens here in JS after a plain SELECT, not via SQLite's json_extract() on the
  * `payload` TEXT column — keeps this portable across whatever SQLite build better-sqlite3 bundles
@@ -16,7 +17,6 @@ export interface EventSummary {
   eventCounts: Record<string, number>;
   deathCauses: DeathCauseCount[];
   waveDistribution: Record<number, number>;
-  cardPickRateByRarity: Record<string, number>;
   runOutcomes: Record<string, number>;
   averagePlaytimeMs: number | null;
   totalRunEnds: number;
@@ -32,7 +32,6 @@ export function getEventSummary(db: Database.Database): EventSummary {
   const eventCounts: Record<string, number> = {};
   const deathCauseMap = new Map<string, number>();
   const waveDistribution: Record<number, number> = {};
-  const cardPickRateByRarity: Record<string, number> = {};
   const runOutcomes: Record<string, number> = {};
   let totalPlaytimeMs = 0;
   let runEndCount = 0;
@@ -57,10 +56,6 @@ export function getEventSummary(db: Database.Database): EventSummary {
 
     if (row.event_type === 'wave_reached' && row.wave !== null) {
       waveDistribution[row.wave] = (waveDistribution[row.wave] || 0) + 1;
-    }
-
-    if (row.event_type === 'level_up_choice' && typeof payload?.rarity === 'string') {
-      cardPickRateByRarity[payload.rarity] = (cardPickRateByRarity[payload.rarity] || 0) + 1;
     }
 
     if (row.event_type === 'run_end' && payload) {
@@ -88,11 +83,71 @@ export function getEventSummary(db: Database.Database): EventSummary {
     eventCounts,
     deathCauses,
     waveDistribution,
-    cardPickRateByRarity,
     runOutcomes,
     averagePlaytimeMs: runEndCount > 0 ? Math.round(totalPlaytimeMs / runEndCount) : null,
     totalRunEnds: runEndCount
   };
+}
+
+export interface CardPickStat {
+  id: string;
+  name: string;
+  rarity: string;
+  timesOffered: number;
+  timesPicked: number;
+  /** Percent of offers this card was actually chosen on — the useful balance signal (a card
+   * offered 500 times and picked 5 is clearly weak; a card only ever offered twice tells you
+   * almost nothing yet, which is why timesOffered is surfaced too instead of just a bare %). */
+  pickRatePct: number;
+}
+
+/** Per-card breakdown (not just per-rarity) of how often each TRAIT_POOL card was offered vs.
+ * actually picked in a level_up_choice — sorted worst-pick-rate-first, since the point is
+ * spotting cards nobody chooses so they can be buffed/reworked. Only includes cards that have
+ * been offered at least once; a card that's never appeared yet has no signal either way (not
+ * the same as "offered but ignored"). */
+export function getCardPickStats(db: Database.Database): CardPickStat[] {
+  const rows = db.prepare("SELECT payload FROM game_events WHERE event_type = 'level_up_choice'").all() as {
+    payload: string | null;
+  }[];
+
+  const timesOffered = new Map<string, number>();
+  const timesPicked = new Map<string, number>();
+
+  for (const row of rows) {
+    if (!row.payload) continue;
+    let payload: Record<string, any>;
+    try {
+      payload = JSON.parse(row.payload);
+    } catch {
+      continue;
+    }
+    if (Array.isArray(payload.offered)) {
+      for (const id of payload.offered) {
+        if (typeof id === 'string') timesOffered.set(id, (timesOffered.get(id) || 0) + 1);
+      }
+    }
+    if (typeof payload.picked === 'string') {
+      timesPicked.set(payload.picked, (timesPicked.get(payload.picked) || 0) + 1);
+    }
+  }
+
+  const stats: CardPickStat[] = [];
+  for (const trait of TRAIT_POOL) {
+    const offered = timesOffered.get(trait.id) || 0;
+    if (offered === 0) continue; // No data yet for this card — not the same as "picked 0%".
+    const picked = timesPicked.get(trait.id) || 0;
+    stats.push({
+      id: trait.id,
+      name: trait.thaiName || trait.name,
+      rarity: trait.rarity,
+      timesOffered: offered,
+      timesPicked: picked,
+      pickRatePct: Math.round((picked / offered) * 1000) / 10
+    });
+  }
+
+  return stats.sort((a, b) => a.pickRatePct - b.pickRatePct);
 }
 
 export interface TopError {

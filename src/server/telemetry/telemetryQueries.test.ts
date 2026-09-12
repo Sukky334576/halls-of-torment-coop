@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createTelemetryConnection } from './telemetryDb';
-import { getEventSummary, getErrorSummary, getSystemMetricsSeries } from './telemetryQueries';
+import { getEventSummary, getErrorSummary, getSystemMetricsSeries, getCardPickStats } from './telemetryQueries';
 
 function seedEvent(
   db: Database.Database,
@@ -71,14 +71,6 @@ describe('telemetryQueries', () => {
       seedEvent(db, 'run_start', { wave: 1 }); // not wave_reached — must not count
       const summary = getEventSummary(db);
       expect(summary.waveDistribution).toEqual({ 5: 2, 10: 1 });
-    });
-
-    it('computes card pick rate by rarity from level_up_choice payloads', () => {
-      seedEvent(db, 'level_up_choice', { payload: { picked: 'a', rarity: 'common' } });
-      seedEvent(db, 'level_up_choice', { payload: { picked: 'b', rarity: 'mythic' } });
-      seedEvent(db, 'level_up_choice', { payload: { picked: 'c', rarity: 'common' } });
-      const summary = getEventSummary(db);
-      expect(summary.cardPickRateByRarity).toEqual({ common: 2, mythic: 1 });
     });
 
     it('computes run outcomes and average playtime from run_end payloads', () => {
@@ -154,6 +146,47 @@ describe('telemetryQueries', () => {
       const series = getSystemMetricsSeries(db, 3);
       expect(series).toHaveLength(3);
       expect(series.map((p) => p.createdAt)).toEqual([7000, 8000, 9000]); // the 3 most recent, still oldest-first
+    });
+  });
+
+  describe('getCardPickStats', () => {
+    // Real TRAIT_POOL ids (src/shared/classes.ts) — the function filters against the real pool,
+    // so a made-up id would silently disappear from the result and the test would prove nothing.
+    const VITALITY = 'vitality_1'; // common, thaiName 'กายาเหล็กไหล (เลือดสูงสุด)'
+    const STRENGTH = 'strength_1'; // rare, thaiName 'พลังยักษ์ทรงพลัง (เพิ่มดาเมจ)'
+
+    it('computes offered/picked counts and pick rate per card, using the Thai display name', () => {
+      // Offered together 3 times, but only ever actually picked once (33.3%).
+      seedEvent(db, 'level_up_choice', { payload: { offered: [VITALITY, STRENGTH], picked: VITALITY } });
+      seedEvent(db, 'level_up_choice', { payload: { offered: [VITALITY, STRENGTH], picked: STRENGTH } });
+      seedEvent(db, 'level_up_choice', { payload: { offered: [VITALITY, STRENGTH], picked: STRENGTH } });
+
+      const stats = getCardPickStats(db);
+      const vitality = stats.find((s) => s.id === VITALITY)!;
+      const strength = stats.find((s) => s.id === STRENGTH)!;
+
+      expect(vitality.name).toBe('กายาเหล็กไหล (เลือดสูงสุด)');
+      expect(vitality.timesOffered).toBe(3);
+      expect(vitality.timesPicked).toBe(1);
+      expect(vitality.pickRatePct).toBeCloseTo(33.3, 1);
+
+      expect(strength.timesOffered).toBe(3);
+      expect(strength.timesPicked).toBe(2);
+      expect(strength.pickRatePct).toBeCloseTo(66.7, 1);
+    });
+
+    it('sorts worst pick rate first — the point of the whole view', () => {
+      seedEvent(db, 'level_up_choice', { payload: { offered: [VITALITY, STRENGTH], picked: STRENGTH } }); // vitality never picked
+      seedEvent(db, 'level_up_choice', { payload: { offered: [VITALITY, STRENGTH], picked: STRENGTH } });
+      const stats = getCardPickStats(db);
+      expect(stats[0].id).toBe(VITALITY); // 0% pick rate — worst — comes first
+      expect(stats[0].pickRatePct).toBe(0);
+    });
+
+    it('excludes cards that have never been offered — no data yet is not the same as "ignored"', () => {
+      seedEvent(db, 'level_up_choice', { payload: { offered: [VITALITY], picked: VITALITY } });
+      const stats = getCardPickStats(db);
+      expect(stats.some((s) => s.id === STRENGTH)).toBe(false);
     });
   });
 });

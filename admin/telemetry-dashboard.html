@@ -29,7 +29,21 @@
   .gate-error { color: #ff6b6b; font-size: 13px; margin-top: 8px; min-height: 16px; }
   .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
   .refresh-btn { width: auto; padding: 8px 16px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  /* Fixed column counts, not auto-fit — auto-fit's "collapse empty tracks" behavior stretched a
+     lone leftover card full-width in one section while leaving a dead gap next to two leftover
+     cards in another (same grid rule, different remainder count, different result). A fixed
+     count is deterministic regardless of how many cards land in the final row. Stat tiles and
+     charts get different counts: a small stat number reads fine at ~230px, but a chart with
+     axes/legend (especially the dual-axis memory one) needs real width to stay legible. */
+  .grid--stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+  .grid--charts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 20px; }
+  @media (max-width: 900px) {
+    .grid--stats { grid-template-columns: repeat(2, 1fr); }
+    .grid--charts { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    .grid--stats { grid-template-columns: 1fr; }
+  }
   .card {
     background: #1a1a22; border: 1px solid #2a2a35; border-radius: 10px; padding: 16px;
   }
@@ -39,11 +53,22 @@
   .stat-value { font-size: 28px; font-weight: 700; color: #ffd166; }
   .stat-sub { font-size: 12px; color: #8a8a97; margin-top: 4px; }
   canvas { max-height: 260px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  /* separate + zero spacing, not collapse — `position: sticky` on <th> silently does nothing
+     under `border-collapse: collapse` in Chromium (a known engine quirk, not a typo here: the
+     computed style genuinely reports `position: sticky` while the element still scrolls with
+     the body). Visually identical either way since borders are drawn per-cell, not shared. */
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #2a2a35; }
   th { color: #8a8a97; font-weight: 500; }
+  /* The card-pick table can hold every TRAIT_POOL card ever offered (~70 in the full game) —
+     without a cap this would make the page arbitrarily long instead of scrolling in place. The
+     header stays pinned (sticky) so a long scroll never loses the column labels. */
+  .table-scroll { max-height: 420px; overflow-y: auto; }
+  .table-scroll thead th { position: sticky; top: 0; background: #1a1a22; }
   .status-open { color: #ff6b6b; }
   .status-fixed { color: #6bcf6b; }
+  .pick-low { color: #ff6b6b; }
+  .pick-high { color: #6bcf6b; }
   .empty-note { color: #8a8a97; font-size: 13px; text-align: center; padding: 40px 0; }
   [hidden] { display: none !important; }
 </style>
@@ -67,8 +92,8 @@
     <button class="refresh-btn" id="refresh-btn">รีเฟรช</button>
   </div>
 
-  <h2 class="section-title">📈 ภาพรวมทั้งหมด</h2>
-  <div class="grid">
+  <h2 class="section-title">ภาพรวมทั้งหมด</h2>
+  <div class="grid--stats">
     <div class="card">
       <h2>จำนวนเกมที่จบแล้ว</h2>
       <div class="stat-value" id="stat-total-runs">—</div>
@@ -88,8 +113,8 @@
     </div>
   </div>
 
-  <h2 class="section-title">🖥️ สุขภาพเซิร์ฟเวอร์</h2>
-  <div class="grid">
+  <h2 class="section-title">สุขภาพเซิร์ฟเวอร์</h2>
+  <div class="grid--stats">
     <div class="card">
       <h2>CPU เครื่อง (Host)</h2>
       <div class="stat-value" id="stat-host-cpu">—</div>
@@ -111,7 +136,7 @@
       <div class="stat-value" id="stat-disk">—</div>
     </div>
   </div>
-  <div class="grid" id="system-charts-grid">
+  <div class="grid--charts" id="system-charts-grid">
     <div class="card">
       <h2>การใช้ CPU ตามเวลา (%)</h2>
       <canvas id="chart-cpu-history"></canvas>
@@ -120,15 +145,11 @@
       <h2>การใช้ RAM ตามเวลา (MB)</h2>
       <canvas id="chart-mem-history"></canvas>
     </div>
-    <div class="card">
-      <h2>พื้นที่ดิสก์ตามเวลา (%)</h2>
-      <canvas id="chart-disk-history"></canvas>
-    </div>
   </div>
   <div id="system-empty" class="empty-note" hidden>ยังไม่มีข้อมูล — เซิร์ฟเวอร์เก็บตัวอย่างแรกทุก 30 วินาที รอสักครู่แล้วกด "รีเฟรช"</div>
 
-  <h2 class="section-title">📊 Gameplay Telemetry</h2>
-  <div class="grid">
+  <h2 class="section-title">สถิติการเล่นเกม</h2>
+  <div class="grid--charts">
     <div class="card">
       <h2>จำนวน Event แยกตามประเภท</h2>
       <canvas id="chart-event-counts"></canvas>
@@ -142,23 +163,34 @@
       <canvas id="chart-wave-dist"></canvas>
     </div>
     <div class="card">
-      <h2>อัตราการเลือกการ์ดตามความหายาก</h2>
-      <canvas id="chart-rarity"></canvas>
-    </div>
-    <div class="card">
       <h2>ผลจบเกม</h2>
       <canvas id="chart-outcomes"></canvas>
     </div>
   </div>
 
   <div class="card">
+    <h2>สถิติการเลือกการ์ด (เรียงจากเลือกน้อยสุด — ไว้ดูว่าการ์ดไหนควรปรับสมดุล)</h2>
+    <div class="table-scroll">
+      <table id="card-stats-table">
+        <thead>
+          <tr><th>การ์ด</th><th>ความหายาก</th><th>เสนอ</th><th>เลือก</th><th>อัตราเลือก</th></tr>
+        </thead>
+        <tbody id="card-stats-table-body"></tbody>
+      </table>
+    </div>
+    <div id="card-stats-empty" class="empty-note" hidden>ยังไม่มีข้อมูลการเลือกการ์ด</div>
+  </div>
+
+  <div class="card">
     <h2>Error ที่เจอบ่อยที่สุด</h2>
-    <table id="error-table">
-      <thead>
-        <tr><th>ประเภท</th><th>ข้อความ</th><th>แหล่งที่มา</th><th>จำนวนครั้ง</th><th>สถานะ</th><th>พบล่าสุด</th></tr>
-      </thead>
-      <tbody id="error-table-body"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table id="error-table">
+        <thead>
+          <tr><th>ประเภท</th><th>ข้อความ</th><th>แหล่งที่มา</th><th>จำนวนครั้ง</th><th>สถานะ</th><th>พบล่าสุด</th></tr>
+        </thead>
+        <tbody id="error-table-body"></tbody>
+      </table>
+    </div>
     <div id="error-table-empty" class="empty-note" hidden>ไม่มี error ที่บันทึกไว้เลย</div>
   </div>
 </div>
@@ -359,18 +391,29 @@ function renderSystemHealth(system) {
     ],
     true
   );
-  lineChart(
-    'chart-disk-history',
-    timeLabels,
-    [
-      {
-        label: 'พื้นที่ดิสก์ใช้ไป %',
-        data: system.map((p) => (p.diskUsedMb !== null && p.diskTotalMb ? Math.round((p.diskUsedMb / p.diskTotalMb) * 1000) / 10 : null)),
-        borderColor: '#f97316'
-      }
-    ],
-    false
-  );
+}
+
+function renderCardStats(cardStats) {
+  const tbody = document.getElementById('card-stats-table-body');
+  const empty = document.getElementById('card-stats-empty');
+  tbody.innerHTML = '';
+  const stats = cardStats || [];
+  empty.hidden = stats.length > 0;
+  for (const card of stats) {
+    // Same textContent-only rule as the error table below — card.name ultimately comes from
+    // TRAIT_POOL (static game data, not user input) so it's not actually attacker-reachable, but
+    // there's no reason to treat DB-sourced rendering differently just because this particular
+    // field happens to be safe today.
+    const tr = document.createElement('tr');
+    const cells = [card.name, labelFor(RARITY_LABELS, card.rarity), String(card.timesOffered), String(card.timesPicked), card.pickRatePct + '%'];
+    cells.forEach((text, i) => {
+      const td = document.createElement('td');
+      td.textContent = text;
+      if (i === 4) td.className = card.pickRatePct < 15 ? 'pick-low' : card.pickRatePct >= 50 ? 'pick-high' : '';
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
 }
 
 function renderDashboard(data) {
@@ -398,8 +441,7 @@ function renderDashboard(data) {
   const waveEntries = objEntries(events.waveDistribution).sort((a, b) => Number(a[0]) - Number(b[0]));
   barChart('chart-wave-dist', waveEntries.map((e) => 'เวฟ ' + e[0]), waveEntries.map((e) => e[1]), '#118ab2');
 
-  const rarityEntries = objEntries(events.cardPickRateByRarity);
-  pieChart('chart-rarity', rarityEntries.map((e) => labelFor(RARITY_LABELS, e[0])), rarityEntries.map((e) => e[1]));
+  renderCardStats(data.cardStats);
 
   const outcomeEntries = objEntries(events.runOutcomes);
   pieChart('chart-outcomes', outcomeEntries.map((e) => labelFor(OUTCOME_LABELS, e[0])), outcomeEntries.map((e) => e[1]));
