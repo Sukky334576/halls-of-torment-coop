@@ -2203,10 +2203,15 @@ export class GameRoom {
 
             this.damageMonster(m, p.damage, p.isCrit, projElem);
 
-            // Gambler lucky coin drop chance on card hit
+            // Gambler lucky coin drop chance on card hit — 2026-09-12: rank never scaled this
+            // (any rank 1-3 gave the exact same flat 3.5%), which is what
+            // docs/archive/2026-09-12-card-description-mismatch-fix.md flagged as the mismatch
+            // against Golden Fortune Aura's own description. Scale per rank instead of gating
+            // on a bare >0 check — 3.5% per rank (3.5/7/10.5%).
             if (p.type === ProjectileType.GAMBLER_CARD) {
               const cOwner = p.ownerId ? this.players.get(p.ownerId) : null;
-              if (cOwner && (cOwner.skills?.highRollerGreedRank || 0) > 0 && Math.random() < 0.035) {
+              const greedRank = cOwner?.skills?.highRollerGreedRank || 0;
+              if (cOwner && greedRank > 0 && Math.random() < 0.035 * greedRank) {
                 this.pickups.push({
                   id: ++this.nextPickupId,
                   type: PickupType.GOLD_COIN,

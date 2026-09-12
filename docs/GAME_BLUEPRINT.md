@@ -26,6 +26,7 @@
 | 2026-09-12 | พบและแก้ bug จาก user report: dashboard โชว์หน้ากรอก `ADMIN_SECRET` แว๊บก่อนทุกครั้งที่ refresh แม้ล็อกอินไว้แล้ว — root cause: `#gate` ไม่ `hidden` เป็นค่าเริ่มต้น, JS ซ่อนได้แค่หลัง `fetchSummary()` async resolve แก้ด้วย synchronous localStorage check ทันทีที่ parser มาถึง element — ดู GAME_WIKI.md §5.7.1 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | พบ gap เพิ่มเติมระหว่าง verify bug ข้างบน: `vite.config.ts` ไม่เคยมี proxy rule ให้ `/admin/` เลย (ตอนแก้ nginx production ก่อนหน้าไม่ได้แก้ dev config คู่กัน) ทำให้ local dev ตกไปที่ SPA fallback เหมือน nginx bug เดิม เพิ่ม `/admin` proxy ใน vite dev server mirror `/api/` เดิม — ดู GAME_WIKI.md §5.7.1 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | เพิ่ม stage filter บน dashboard (dropdown ด่าน 1-3/ทุกด่าน) — user เตือนว่าเกมมี 3 ด่านความยากต่างกันมาก รวมสถิติข้ามด่านทำให้ตีความผิด `getEventSummary()`/`getCardPickStats()` รับ `stageId?` ใหม่, `?stage=` query param ใหม่ใน `GET /api/admin/telemetry/summary` — system health/error log ตั้งใจไม่กรองตามด่าน — ดู GAME_WIKI.md §5.7.5 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | แก้ risk #27 (description กับ apply()/โค้ดจริงของ 5 การ์ดไม่ตรงกัน) — mark Refactor Roadmap #27 เป็น ✅ แก้แล้ว, sync กับ GAME_WIKI.md §4.7 | `docs/archive/2026-09-12-card-description-mismatch-fix.md` |
 >
 > สร้างเมื่อ 2026-09-11
 
@@ -342,6 +343,7 @@ erDiagram
 | 24 | `telemetry.db` ไม่มี retention/prune policy (§5.8, ใหม่) | เพิ่ม cron/startup job ลบ `game_events`/`error_log` เก่ากว่า N วัน (N ยังไม่กำหนด — รอ user ตัดสินใจ retention window) | **S** — ยังไม่ทำ ตั้งใจเลื่อนไว้ก่อนตามที่ระบุใน spec |
 | 25 | ✅ **แก้แล้ว 2026-09-12** — ~~ไม่มี dashboard อ่าน telemetry~~ (§5.7.1, §5.8) | `GET /admin/telemetry` (static page — deploy แรกไปที่ path นี้ตรงๆ พังเพราะ nginx ไม่เคย proxy `/admin/` มา Node, ย้ายไป `/api/` ชั่วคราว, สุดท้ายเพิ่ม `location /admin/` ใหม่ใน nginx site config แล้วย้ายกลับมา) + `GET /api/admin/telemetry/summary` (auth: `ADMIN_SECRET` header) — ระหว่างทดสอบพบ stored-XSS จริง (draft แรก render error message ผ่าน `innerHTML` จาก endpoint ที่ไม่มี auth) แก้เป็น `textContent` + เพิ่ม whitelist validation ที่ ingest endpoint | **M** — เสร็จแล้ว |
 | 26 | nginx site config ไม่ได้อยู่ใน git repo (§5.8, ใหม่) | พิจารณาเก็บ `/etc/nginx/sites-available/default` (หรือ template ของมัน) ไว้ใน repo เป็นเอกสารอ้างอิงอย่างน้อย กัน routing พังเงียบๆ ซ้ำถ้า server ถูกสร้างใหม่/config ถูก revert | **S** (แค่ copy ไฟล์เข้า repo ก็พอสำหรับตอนนี้) — ยังไม่ทำ |
+| 27 | ✅ **แก้แล้ว 2026-09-12** — ~~Description กับ `apply()`/โค้ดจริงของ 5 การ์ดไม่ตรงกัน~~ (§4.7, พบจาก session `card-list-documentation`) | `magnet_1`/`gambler_fortune_greed` แก้โค้ดให้ตรง design intent เดิม (มี comment/ไม่มี evidence intent ต่างกัน — ดูเหตุผลแยกใน GAME_WIKI.md §4.7), `commando_ap_rounds`/`cowboy_quick_draw` แก้ description แทน (แก้โค้ดเสี่ยง overpower/ซ้ำซ้อน), `gambler_royal_flush` ไม่แก้ (ไม่ใช่ bug จริง) | **S** — `classes.ts`, `GameRoom.ts` + test 2 ไฟล์ใหม่ | เสร็จแล้ว |
 
 ---
 
