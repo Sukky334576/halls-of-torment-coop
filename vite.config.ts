@@ -26,6 +26,15 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true
+      },
+      // Mirrors the /admin/ location block added to the production nginx config (see
+      // docs/archive/2026-09-11-telemetry-error-logging.md) — without it, /admin/telemetry falls
+      // through to Vite's own SPA fallback here in dev the same way it silently fell through to
+      // the game client on production before that nginx fix, making local testing of the
+      // dashboard route through the real proxy impossible (only reachable via :8080 directly).
+      '/admin': {
+        target: 'http://localhost:8080',
+        changeOrigin: true
       }
     }
   },

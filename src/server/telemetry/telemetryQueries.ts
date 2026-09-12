@@ -22,8 +22,17 @@ export interface EventSummary {
   totalRunEnds: number;
 }
 
-export function getEventSummary(db: Database.Database): EventSummary {
-  const rows = db.prepare('SELECT event_type, wave, payload FROM game_events').all() as {
+/** `stageId` filters everything to one of the 3 stages (src/shared/stages.ts) when given —
+ * omitted/undefined means all stages combined. Stages scale monster HP/damage very differently
+ * (1.0/1.0 → 1.6/1.4 → 2.5/2.0 per GAME_WIKI.md), so mixing them is misleading for anything
+ * difficulty-shaped: "most runs stall around wave 12" could be almost entirely a stage 3 effect
+ * while stage 1 sails past it, and averaging the two together shows neither picture correctly. */
+export function getEventSummary(db: Database.Database, stageId?: number): EventSummary {
+  const rows = (
+    stageId !== undefined
+      ? db.prepare('SELECT event_type, wave, payload FROM game_events WHERE stage_id = ?').all(stageId)
+      : db.prepare('SELECT event_type, wave, payload FROM game_events').all()
+  ) as {
     event_type: string;
     wave: number | null;
     payload: string | null;
@@ -106,10 +115,12 @@ export interface CardPickStat {
  * spotting cards nobody chooses so they can be buffed/reworked. Only includes cards that have
  * been offered at least once; a card that's never appeared yet has no signal either way (not
  * the same as "offered but ignored"). */
-export function getCardPickStats(db: Database.Database): CardPickStat[] {
-  const rows = db.prepare("SELECT payload FROM game_events WHERE event_type = 'level_up_choice'").all() as {
-    payload: string | null;
-  }[];
+export function getCardPickStats(db: Database.Database, stageId?: number): CardPickStat[] {
+  const rows = (
+    stageId !== undefined
+      ? db.prepare("SELECT payload FROM game_events WHERE event_type = 'level_up_choice' AND stage_id = ?").all(stageId)
+      : db.prepare("SELECT payload FROM game_events WHERE event_type = 'level_up_choice'").all()
+  ) as { payload: string | null }[];
 
   const timesOffered = new Map<string, number>();
   const timesPicked = new Map<string, number>();

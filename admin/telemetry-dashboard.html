@@ -27,8 +27,13 @@
     border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px;
   }
   .gate-error { color: #ff6b6b; font-size: 13px; margin-top: 8px; min-height: 16px; }
-  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+  .toolbar-actions { display: flex; align-items: center; gap: 10px; }
   .refresh-btn { width: auto; padding: 8px 16px; }
+  #stage-filter {
+    padding: 8px 12px; background: #1a1a22; border: 1px solid #33333f; border-radius: 6px;
+    color: #e5e5ea; font-size: 13px;
+  }
   /* Fixed column counts, not auto-fit — auto-fit's "collapse empty tracks" behavior stretched a
      lone leftover card full-width in one section while leaving a dead gap next to two leftover
      cards in another (same grid rule, different remainder count, different result). A fixed
@@ -75,13 +80,25 @@
 </head>
 <body>
 
-<div id="gate" class="gate">
+<div id="gate" class="gate" hidden>
   <h1>🗡️ แดชบอร์ด Telemetry</h1>
   <p class="subtitle">ใส่ Admin secret ก่อนเข้าดูข้อมูล</p>
   <input id="secret-input" type="password" placeholder="Admin secret" autocomplete="off" />
   <button id="gate-submit">เข้าดูข้อมูล</button>
   <div id="gate-error" class="gate-error"></div>
 </div>
+<script>
+  // Runs synchronously the instant the parser reaches this point — before the rest of the page
+  // (including the main script at the bottom) is even parsed, and long before fetchSummary()'s
+  // network round-trip could resolve. #gate defaults to hidden above specifically so that an
+  // already-authenticated visitor (secret already in localStorage) never gets a frame where the
+  // login gate is visible: only reveal it here when there truly isn't a stored secret yet.
+  try {
+    if (!localStorage.getItem('torment_admin_secret')) document.getElementById('gate').hidden = false;
+  } catch {
+    document.getElementById('gate').hidden = false; // localStorage unavailable — same as no secret
+  }
+</script>
 
 <div id="dashboard" hidden>
   <div class="toolbar">
@@ -89,7 +106,15 @@
       <h1>🗡️ Torment of Souls — แดชบอร์ด Telemetry</h1>
       <div class="subtitle" id="last-updated"></div>
     </div>
-    <button class="refresh-btn" id="refresh-btn">รีเฟรช</button>
+    <div class="toolbar-actions">
+      <select id="stage-filter">
+        <option value="">ทุกด่าน</option>
+        <option value="1">ด่าน 1 (สุสานวิญญาณหลอน)</option>
+        <option value="2">ด่าน 2 (ถ้ำเพลิงอเวจี)</option>
+        <option value="3">ด่าน 3 (ขุมนรกทมิฬศิลาดำ)</option>
+      </select>
+      <button class="refresh-btn" id="refresh-btn">รีเฟรช</button>
+    </div>
   </div>
 
   <h2 class="section-title">ภาพรวมทั้งหมด</h2>
@@ -103,7 +128,7 @@
       <div class="stat-value" id="stat-avg-playtime">—</div>
     </div>
     <div class="card">
-      <h2>Error ที่ยังไม่แก้</h2>
+      <h2>Error ที่ยังไม่แก้ (ทุกด่าน)</h2>
       <div class="stat-value" id="stat-open-errors">—</div>
       <div class="stat-sub" id="stat-error-sub"></div>
     </div>
@@ -148,7 +173,7 @@
   </div>
   <div id="system-empty" class="empty-note" hidden>ยังไม่มีข้อมูล — เซิร์ฟเวอร์เก็บตัวอย่างแรกทุก 30 วินาที รอสักครู่แล้วกด "รีเฟรช"</div>
 
-  <h2 class="section-title">สถิติการเล่นเกม</h2>
+  <h2 class="section-title">สถิติการเล่นเกม (ตามด่านที่เลือก)</h2>
   <div class="grid--charts">
     <div class="card">
       <h2>จำนวน Event แยกตามประเภท</h2>
@@ -169,7 +194,7 @@
   </div>
 
   <div class="card">
-    <h2>สถิติการเลือกการ์ด (เรียงจากเลือกน้อยสุด — ไว้ดูว่าการ์ดไหนควรปรับสมดุล)</h2>
+    <h2>สถิติการเลือกการ์ด (ตามด่านที่เลือก, เรียงจากเลือกน้อยสุด — ไว้ดูว่าการ์ดไหนควรปรับสมดุล)</h2>
     <div class="table-scroll">
       <table id="card-stats-table">
         <thead>
@@ -429,7 +454,11 @@ function renderDashboard(data) {
   document.getElementById('stat-error-sub').textContent = `แก้แล้ว ${errors.fixedCount} / รวมทั้งหมด ${errors.totalSignatures} รายการ`;
   document.getElementById('stat-total-events').textContent = events.totalEvents;
 
-  const eventCountEntries = objEntries(events.eventCounts);
+  // wave_reached fires once per wave (many times per run) while every other type fires ~once
+  // per run — plotted together, wave_reached's bar dwarfs the others and makes them unreadable.
+  // It already has its own dedicated chart below ("เวฟที่ผู้เล่นไปถึง"), so dropping it here loses
+  // no information, just the noise that was drowning out the more decision-relevant event types.
+  const eventCountEntries = objEntries(events.eventCounts).filter(([type]) => type !== 'wave_reached');
   barChart('chart-event-counts', eventCountEntries.map((e) => labelFor(EVENT_TYPE_LABELS, e[0])), eventCountEntries.map((e) => e[1]));
 
   const deathLabels = events.deathCauses.map((d) => {
@@ -479,7 +508,9 @@ function renderDashboard(data) {
 
 async function fetchSummary() {
   const secret = getStoredSecret();
-  const res = await fetch('/api/admin/telemetry/summary', { headers: { 'X-Admin-Secret': secret || '' } });
+  const stage = document.getElementById('stage-filter').value;
+  const url = '/api/admin/telemetry/summary' + (stage ? `?stage=${stage}` : '');
+  const res = await fetch(url, { headers: { 'X-Admin-Secret': secret || '' } });
   if (res.status === 401) {
     clearStoredSecret();
     showGate('Secret ไม่ถูกต้องหรือหมดอายุ ลองใส่ใหม่');
@@ -515,6 +546,7 @@ document.getElementById('secret-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') document.getElementById('gate-submit').click();
 });
 document.getElementById('refresh-btn').addEventListener('click', fetchSummary);
+document.getElementById('stage-filter').addEventListener('change', fetchSummary);
 
 // Auto-refresh every 30s — matches SystemMetricsSampler's own sampling cadence (server.ts), so
 // polling faster would just re-fetch the same data with nothing new to show. Paused while the

@@ -479,3 +479,74 @@ rendered while it is not displayed") ทำให้ scroll-linked repaint/`requ
 
 `GAME_WIKI.md` (§5.7.1 แก้คำอธิบาย summary endpoint, §5.7.2 ตัดกราฟดิสก์ + อธิบายเหตุผล, §5.7.3 ใหม่
 Card Pick Stats, §5.7.4 ใหม่ Layout Audit, Change Log), `GAME_BLUEPRINT.md` (Change Log)
+
+## Round 7 — Gate-flash bug, vite dev proxy gap, stage filter (2026-09-12, ต่อจาก Round 6)
+
+User รายงานบั๊กสด ("ทุกครั้งที่ refresh จะเห็นหน้าให้กรอก admin_secret แว๊บนึงทุกครั้ง") ระหว่างที่กำลัง
+ทำ feature stage filter (ตอบ "แล้วอย่าลืมว่ามันมี 3 ด่าน ณ ตอนนี้" ค้างอยู่) จัดการบั๊กก่อนตามลำดับ
+ที่ user รายงานเข้ามา แล้วค่อยกลับมาทำ stage filter ต่อ
+
+### 1. Gate-flash bug (แก้ตามที่ user อนุมัติ "แก้เลยครับ")
+
+**อาการ**: หน้า `/admin/telemetry` โชว์ฟอร์มกรอก `ADMIN_SECRET` แว๊บขึ้นมาก่อนทุกครั้งที่ refresh
+แม้จะเคยใส่ secret ไว้ใน `localStorage` แล้วก็ตาม
+
+**Root cause**: `#gate` div ไม่มี `hidden` attribute ในค่าเริ่มต้นของ markup — ส่วนโค้ด JS เดิมเรียก
+`gate.hidden = true` อยู่ข้างในผลลัพธ์ของ `fetchSummary()` เท่านั้น ซึ่งเป็น `async` ต้องรอ network
+round-trip ก่อน ระหว่างช่วง initial paint ถึง fetch resolve เสร็จ (สั้นแค่ไม่กี่ร้อย ms แต่ผู้ใช้เห็นได้
+จริง) เบราว์เซอร์ paint `#gate` ค้างไว้ก่อนเสมอเพราะยังไม่มีอะไรไปสั่งซ่อนมันในช่วงนั้น
+
+**แก้**: ตั้ง `#gate` ให้ `hidden` เป็นค่าเริ่มต้นในตัว markup เอง แล้วแทรก inline `<script>` เล็กๆ
+ต่อท้าย div นั้นทันที — ทำงานแบบ synchronous ตอน parser มาถึงจุดนี้พอดี (ก่อนเนื้อหาส่วนอื่นของหน้า
+และก่อน main script ท้ายไฟล์จะรันด้วยซ้ำ) เช็ค `localStorage.getItem('torment_admin_secret')` ตรงๆ
+แล้วเปิดโชว์ gate เฉพาะตอนไม่มี secret เก็บไว้เท่านั้น (wrap ด้วย `try/catch` เผื่อ private-browsing
+mode ที่ `localStorage` อาจ throw — pattern เดียวกับ `getStoredSecret()` เดิมที่มีอยู่แล้ว)
+
+### 2. Vite dev proxy gap (พบระหว่าง verify bug ข้างบน)
+
+พยายาม verify fix ข้างบนผ่าน real proxy (`localhost:3000`, ไม่ใช่ `:8080` ตรงๆ — ตามบทเรียนจาก
+nginx bug รอบก่อน) แต่เจอว่า `/admin/telemetry` เปิดไม่ขึ้นเลย โหลดหน้าเกม SPA แทนแบบเงียบๆ — **บั๊ก
+คนละตัวที่ซ่อนอยู่**: `vite.config.ts`'s `server.proxy` มีแค่ `/ws`/`/api` ไม่เคยมี `/admin` เลยตั้งแต่
+สร้างมา ตอนแก้ nginx production (Round 3.2) ไม่ได้แก้ dev config คู่กันไปด้วย ทำให้ dev
+environment ไม่เคย test route นี้ผ่าน proxy จริงได้เลยนับตั้งแต่ dashboard มีอยู่ — สอดคล้องกับที่เคย
+บันทึกไว้ว่า "ต้อง verify ผ่าน real proxy layer เสมอ" (Round 3.1) แต่ layer local เองกลับมี gap
+เดียวกันซ้ำ แก้โดยเพิ่ม `'/admin': { target: 'http://localhost:8080', changeOrigin: true }` เข้าไป
+mirror `/api` เดิมเป๊ะๆ
+
+### 3. Stage Filter (กลับมาทำ feature ที่ค้างไว้)
+
+`getEventSummary()`/`getCardPickStats()` (`telemetryQueries.ts`) รับ `stageId?: number` เพิ่มใหม่ —
+มีค่า → `WHERE stage_id = ?`, ไม่มีค่า → query เดิมทุกประการ (backward compatible)
+`handleTelemetrySummary()` (`server.ts`) parse `?stage=` query param, whitelist เฉพาะ `1`/`2`/`3`
+(`Number(rawStage)` + `[1,2,3].includes(...)`) ส่งต่อให้ทั้งสองฟังก์ชัน — **ตั้งใจไม่ส่งให้**
+`getErrorSummary()`/`getSystemMetricsSeries()` เพราะ error log/system health ไม่ใช่แนวคิดที่ผูกกับ
+ด่านที่กำลังเล่นอยู่โดยธรรมชาติ (เซิร์ฟเวอร์ตัวเดียวรันทุกด่านพร้อมกัน)
+
+Dashboard เพิ่ม `<select id="stage-filter">` ในแถบ toolbar ข้างปุ่มรีเฟรช (ตัวเลือก: ทุกด่าน / ด่าน
+1 สุสานวิญญาณหลอน / ด่าน 2 ถ้ำเพลิงอเวจี / ด่าน 3 ขุมนรกทมิฬศิลาดำ — ชื่อด่านจริงจาก
+`src/shared/stages.ts`, ไม่ได้เดา) `change` event เรียก `fetchSummary()` ทันที ซึ่งอ่านค่า dropdown
+ปัจจุบันทุกครั้งที่ถูกเรียก จึงทำงานถูกต้องร่วมกับ auto-refresh ทุก 30 วิเดิมได้เลยไม่ต้องแก้ auto-refresh
+logic เพิ่ม หัวข้อ "สถิติการเล่นเกม"/"สถิติการเลือกการ์ด" (ส่วนที่ถูกกรอง) มีข้อความ "(ตามด่านที่เลือก)"
+กำกับ ส่วน "Error ที่ยังไม่แก้" (การ์ดในภาพรวม, ไม่ถูกกรอง แต่โชว์ปนอยู่กับการ์ดที่ถูกกรองอื่นๆ) มี
+"(ทุกด่าน)" กำกับกันสับสน
+
+### Test
+
+- `npx tsc --noEmit` ✅
+- `npx vitest run` ✅ **85/85** รันซ้ำ 3 ครั้งไม่มี fail — เพิ่ม 2 test ใหม่ใน `telemetryQueries.test.ts`
+  (`getEventSummary`/`getCardPickStats` กรอง `stageId` ถูกต้อง, รวมทุกด่านถูกต้องเมื่อไม่ส่ง `stageId`)
+  และเพิ่ม `stageId` option ใน `seedEvent()` test helper (default `1` กันกระทบ test เดิม)
+- Manual E2E ผ่าน `localhost:3000` (real vite dev proxy หลังแก้ gap ข้อ 2): ยืนยัน gate-flash fix
+  ด้วยการตั้ง secret ไว้ล่วงหน้าใน `localStorage` แล้ว reload — `#gate`/`#dashboard` อยู่ในสถานะ
+  hidden/visible ที่ถูกต้องทันที ไม่มี flash; ยืนยันกรณีไม่มี secret เก็บไว้ยังโชว์ gate ปกติเหมือนเดิม
+  (ไม่ใช่ regression); seed event จริงแยกด่าน 1 กับด่าน 3 คนละชุด แล้วสลับ dropdown ยืนยันตัวเลข
+  (จำนวนเกมจบ, เวลาเฉลี่ย, จำนวน event) เปลี่ยนตามด่านที่เลือกถูกต้อง, error count และ system health
+  ไม่เปลี่ยนตามด่านตามที่ตั้งใจ
+- `/impeccable layout` ตรวจ dropdown ใหม่: ความสูง/border-radius ตรงกับปุ่มรีเฟรช (35px/6px ทั้งคู่),
+  contrast ตรงกับ pattern สีที่ใช้อยู่แล้วทั้งหน้า, ทดสอบที่ viewport มือถือ (375px) toolbar wrap ได้
+  เรียบร้อยไม่ overflow/ทับกัน — ไม่พบปัญหา
+
+### เอกสารที่อัปเดต
+
+`GAME_WIKI.md` (§5.7.1 เพิ่มหมายเหตุ gate-flash + vite proxy gap, §5.7.5 ใหม่ Stage Filter, Change
+Log), `GAME_BLUEPRINT.md` (Change Log), archive spec นี้ (Round 7 ใหม่)

@@ -6,12 +6,24 @@ import { getEventSummary, getErrorSummary, getSystemMetricsSeries, getCardPickSt
 function seedEvent(
   db: Database.Database,
   eventType: string,
-  opts: { wave?: number | null; payload?: unknown; playerId?: string } = {}
+  opts: { wave?: number | null; payload?: unknown; playerId?: string; stageId?: number } = {}
 ): void {
   db.prepare(
     `INSERT INTO game_events (run_id, player_id, class, stage_id, party_size, build_version, event_type, wave, elapsed_ms, payload, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run('run-1', opts.playerId ?? null, null, 1, 1, 'test', eventType, opts.wave ?? null, 1000, opts.payload ? JSON.stringify(opts.payload) : null, Date.now());
+  ).run(
+    'run-1',
+    opts.playerId ?? null,
+    null,
+    opts.stageId ?? 1,
+    1,
+    'test',
+    eventType,
+    opts.wave ?? null,
+    1000,
+    opts.payload ? JSON.stringify(opts.payload) : null,
+    Date.now()
+  );
 }
 
 function seedError(db: Database.Database, source: string, category: string, occurrenceCount: number, status: string): void {
@@ -88,6 +100,24 @@ describe('telemetryQueries', () => {
       const summary = getEventSummary(db);
       expect(summary.averagePlaytimeMs).toBeNull();
       expect(summary.totalRunEnds).toBe(0);
+    });
+
+    it('filters to a single stage when stageId is given, and combines all stages when omitted', () => {
+      seedEvent(db, 'wave_reached', { wave: 5, stageId: 1 });
+      seedEvent(db, 'wave_reached', { wave: 20, stageId: 2 });
+      seedEvent(db, 'wave_reached', { wave: 20, stageId: 2 });
+
+      const stage1 = getEventSummary(db, 1);
+      expect(stage1.totalEvents).toBe(1);
+      expect(stage1.waveDistribution).toEqual({ 5: 1 });
+
+      const stage2 = getEventSummary(db, 2);
+      expect(stage2.totalEvents).toBe(2);
+      expect(stage2.waveDistribution).toEqual({ 20: 2 });
+
+      const allStages = getEventSummary(db);
+      expect(allStages.totalEvents).toBe(3);
+      expect(allStages.waveDistribution).toEqual({ 5: 1, 20: 2 });
     });
   });
 
@@ -187,6 +217,23 @@ describe('telemetryQueries', () => {
       seedEvent(db, 'level_up_choice', { payload: { offered: [VITALITY], picked: VITALITY } });
       const stats = getCardPickStats(db);
       expect(stats.some((s) => s.id === STRENGTH)).toBe(false);
+    });
+
+    it('filters to a single stage when stageId is given', () => {
+      seedEvent(db, 'level_up_choice', { payload: { offered: [VITALITY], picked: VITALITY }, stageId: 1 });
+      seedEvent(db, 'level_up_choice', { payload: { offered: [STRENGTH], picked: STRENGTH }, stageId: 2 });
+
+      const stage1 = getCardPickStats(db, 1);
+      expect(stage1.some((s) => s.id === VITALITY)).toBe(true);
+      expect(stage1.some((s) => s.id === STRENGTH)).toBe(false);
+
+      const stage2 = getCardPickStats(db, 2);
+      expect(stage2.some((s) => s.id === STRENGTH)).toBe(true);
+      expect(stage2.some((s) => s.id === VITALITY)).toBe(false);
+
+      const allStages = getCardPickStats(db);
+      expect(allStages.some((s) => s.id === VITALITY)).toBe(true);
+      expect(allStages.some((s) => s.id === STRENGTH)).toBe(true);
     });
   });
 });

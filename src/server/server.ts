@@ -529,12 +529,20 @@ systemMetricsSampler.start(SYSTEM_METRICS_INTERVAL_MS);
 
 function handleTelemetrySummary(req: http.IncomingMessage, res: http.ServerResponse) {
   if (!requireAdminSecret(req, res)) return;
+
+  // ?stage=1|2|3 filters the stage-shaped stats (event/card breakdowns) — omitted or anything
+  // that doesn't parse to a real stage id means "all stages combined". System health and error
+  // log are never stage-scoped concepts, so they ignore this entirely regardless.
+  const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+  const rawStage = url.searchParams.get('stage');
+  const stageId = rawStage && [1, 2, 3].includes(Number(rawStage)) ? Number(rawStage) : undefined;
+
   sendJson(res, 200, {
     success: true,
-    events: getEventSummary(telemetryDb),
+    events: getEventSummary(telemetryDb, stageId),
     errors: getErrorSummary(telemetryDb),
     system: getSystemMetricsSeries(telemetryDb),
-    cardStats: getCardPickStats(telemetryDb)
+    cardStats: getCardPickStats(telemetryDb, stageId)
   });
 }
 

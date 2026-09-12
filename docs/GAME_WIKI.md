@@ -23,6 +23,9 @@
 | 2026-09-12 | ทำ dashboard เป็นภาษาไทยเป็นหลัก (ตรวจ `I18n.ts`/`classes.ts`/`HUD.ts` ก่อนแปล ใช้คำเดิมที่เกมมีอยู่แล้วสำหรับ outcome, บัญญัติคำใหม่เฉพาะ rarity ที่เกมเองก็ไม่มีคำไทย) + เพิ่มระบบ System Metrics (CPU/RAM ทั้ง host และ process ใหม่ทั้งหมด — ดู §5.7.2) พบและแก้ edge case จาก unit test: `computeProcessCpuPercent()` return `null` ผิดตอน delta เวลาเป็นศูนย์ ทำแถวทั้งแถวหายไปทั้งที่ข้อมูลอื่นวัดได้ปกติ | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | เพิ่ม disk space เข้า System Metrics (`fs.statfsSync`) + auto-refresh 30 วิบน dashboard (หยุดตอนสลับแท็บ) — ต้อง migrate schema `system_metrics` ที่ deploy ไปแล้ว (`ensureColumn()` ใหม่) พบและแก้ **race condition จริงในชุด test ทั้งหมด** (ไม่ใช่แค่ feature นี้): module-level singleton เปิดไฟล์ dev DB จริงเป็น side effect ของการ import ชนกันข้าม vitest worker ได้ `database is locked` — เคยเข้าใจผิดว่าเป็น flake มาหลายรอบ | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | ตัดกราฟ "พื้นที่ดิสก์ตามเวลา" ออก (เหลือแค่ stat card — user ถามว่าจำเป็นไหม, ดิสก์เปลี่ยนช้า), เปลี่ยน "card pick rate ต่อ rarity" เป็นตารางแยกทีละใบการ์ดจริง (`getCardPickStats()` ใหม่ — ดู §5.7.3), รัน `/impeccable layout` แก้ grid wrap ไม่สม่ำเสมอ + ตัด emoji section-icon (craft-floor ban) + เพิ่ม scrollable table + sticky header (ดู §5.7.4) | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | พบและแก้ bug จาก user report: หน้า dashboard โชว์หน้ากรอก admin secret แว๊บขึ้นมาก่อนทุกครั้งที่ refresh แม้เคยล็อกอินไว้แล้ว — root cause: `#gate` ไม่มี `hidden` attribute ใน markup เริ่มต้น ส่วน JS ซ่อนมันได้แค่ตอน `fetchSummary()` (async) resolve สำเร็จ ทำให้มีช่วงจาก initial paint ถึง fetch resolve ที่ gate โชว์ค้างอยู่ แก้โดยเช็ค `localStorage` แบบ synchronous ทันทีที่ element ถูก parse (ก่อนสคริปต์หลักท้ายไฟล์จะรันด้วยซ้ำ) — ดู §5.7.1 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | พบ gap เพิ่มเติมระหว่างพยายาม verify bug ข้างบนผ่าน real proxy: `vite.config.ts` (dev server local) ไม่เคยมี proxy rule ให้ `/admin/` เลยตั้งแต่แรก — ตอนแก้ nginx production ก่อนหน้านี้ (2026-09-12 รอบก่อน) ไม่ได้แก้ dev config คู่กันไปด้วย ทำให้ `localhost:3000/admin/telemetry` ตกไปที่ SPA ของเกม เหมือน nginx bug เดิมทุกประการ แต่คนละ layer (`vite proxy` ไม่ใช่ `nginx`) เพิ่ม `location /admin` ใน vite proxy ให้ mirror `/api/` เดิม — ดู §5.7.1 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | เพิ่ม stage filter บน dashboard (dropdown เลือกด่าน 1-3 หรือทุกด่าน) — user เตือนว่าเกมมี 3 ด่านที่ความยากต่างกันมาก (`mobHpMultiplier` 1.0→1.6→2.5, `src/shared/stages.ts`) รวมสถิติทุกด่านเข้าด้วยกันจะทำให้ตีความผิด (เช่น wave distribution ถูก dominate ด้วยด่านที่คนเข้าเล่นเยอะสุด ไม่ใช่ด่านที่ยากสุด) `getEventSummary()`/`getCardPickStats()` รับ `stageId?: number` เพิ่มใหม่, `GET /api/admin/telemetry/summary?stage=1\|2\|3` — สุขภาพเซิร์ฟเวอร์ (CPU/RAM/ดิสก์) และ error log ตั้งใจไม่กรองตามด่าน (ไม่ใช่แนวคิดที่ผูกกับด่านโดยธรรมชาติ) — ดู §5.7.5 | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 
 ## สารบัญ
 
@@ -750,6 +753,23 @@ route ใหม่ใน `server.ts`
   `JWT_SECRET` ส่งผ่าน header `X-Admin-Secret` เก็บไว้ใน `localStorage` ฝั่ง browser หลัง submit
   ครั้งแรก auth ผิดโดน `isRateLimited()` เดิม (bucket เดียวกับ login brute-force guard)
 
+**🐛 พบและแก้ bug "gate โชว์แว๊บ" (2026-09-12, user report)**: หน้า `#gate` (ฟอร์มกรอก
+`ADMIN_SECRET`) ไม่มี `hidden` attribute ในค่าเริ่มต้นของ markup ส่วน JS เดิมซ่อนมันได้ก็ต่อเมื่อ
+`fetchSummary()` (async, ต้องรอ network round-trip) resolve สำเร็จเท่านั้น — ระหว่าง initial paint
+ถึง fetch resolve เสร็จ (แม้จะสั้นระดับ ms) เบราว์เซอร์ paint `#gate` ค้างไว้ก่อนเสมอ ทำให้ visitor
+ที่ login ไว้แล้วเห็นฟอร์มกรอก secret แว๊บขึ้นมาทุกครั้งที่ refresh แก้โดยตั้ง `#gate` ให้ `hidden`
+เป็นค่าเริ่มต้น แล้วแทรก inline `<script>` เล็กๆ ต่อท้าย div นั้นทันที (รันแบบ synchronous ตอน parser
+มาถึงจุดนี้พอดี ก่อนส่วนอื่นของหน้าและก่อน main script ท้ายไฟล์จะรันด้วยซ้ำ) เช็ค `localStorage` ตรงๆ
+แล้วเปิดโชว์ gate เฉพาะตอนไม่มี secret เก็บไว้เท่านั้น
+
+**🐛 พบ gap เพิ่มเติมระหว่าง verify bug ข้างบน (2026-09-12)**: `vite.config.ts` (dev server ที่ใช้
+ตอนพัฒนา local) ไม่เคยมี proxy rule ให้ `/admin/` เลยตั้งแต่แรก — ตอนแก้ nginx production
+(§Change Log 2026-09-12 รอบก่อน) ไม่ได้แก้ dev config คู่กันไปด้วย ทำให้ `localhost:3000/admin/telemetry`
+ตกไปที่ SPA fallback ของ Vite เอง (เสิร์ฟหน้าเกมแทนเงียบๆ) — เหมือน nginx bug เดิมทุกประการ แค่คนละ
+layer (`vite proxy` ไม่ใช่ `nginx`) ทำให้การ verify ผ่าน real proxy ตามที่ตั้งเป้าไว้หลัง nginx bug
+รอบก่อน (ดู Change Log 2026-09-12) ไม่ครบจริงสำหรับ route นี้โดยเฉพาะ แก้โดยเพิ่ม `'/admin'` เข้าไปใน
+`server.proxy` ของ `vite.config.ts` mirror รูปแบบเดียวกับ `/api` เดิม (`target: 'http://localhost:8080', changeOrigin: true`)
+
 **⚠️ พบและแก้ stored-XSS ระหว่างทดสอบ (2026-09-12)**: draft แรกของหน้า dashboard render ตาราง error
 ด้วย `tr.innerHTML = \`...${err.message}...\`` — `message`/`category` มาจาก
 `POST /api/telemetry/errors` ที่**ไม่มี auth และไม่ sanitize HTML** โดยตรง เท่ากับใครก็ inject
@@ -864,6 +884,35 @@ mechanical scan (`impeccable detect --scope layout`, ผลว่าง ทั�
    `position: sticky` ยืนยันแล้วว่าถูก apply จริง (`getComputedStyle`) และเป็น pattern มาตรฐานที่
    รองรับกว้างขวางร่วมกับ `border-collapse: separate` แต่ยังไม่ได้เห็นด้วยตาจริงว่า sticky ทำงาน
    ระหว่าง scroll — ควรเช็คตอนเปิดหน้าจริงครั้งแรกหลัง deploy
+
+### 5.7.5 Stage Filter
+
+ที่มา: `stageId?: number` param ใหม่ใน `getEventSummary()`/`getCardPickStats()`
+(`telemetryQueries.ts`), `?stage=` query param ใน `GET /api/admin/telemetry/summary`
+(`server.ts`), dropdown ใหม่ใน `admin/telemetry-dashboard.html`
+
+เกมมี 3 ด่าน (`src/shared/stages.ts`) ที่ความยากต่างกันมาก — `mobHpMultiplier`/`mobDmgMultiplier`
+ไล่จาก 1.0/1.0 (ด่าน 1) → 1.6/1.4 (ด่าน 2) → 2.5/2.0 (ด่าน 3) รวมสถิติทุกด่านเข้าด้วยกันแบบเดิม
+(ก่อนรอบนี้) ทำให้ตีความผิดได้ง่าย เช่น "ส่วนใหญ่ผู้เล่นตันแถวเวฟ 12" อาจเป็นภาพของด่าน 3 เกือบทั้งหมด
+ขณะที่ด่าน 1 ผ่านเวฟนั้นไปเรียบร้อยแล้ว แต่ค่าเฉลี่ยรวมไม่เห็นความต่างนี้เลย
+
+**Backend**: `getEventSummary(db, stageId?)`/`getCardPickStats(db, stageId?)` — เมื่อส่ง `stageId`
+มา เปลี่ยนจาก `SELECT ... FROM game_events` เป็น `SELECT ... FROM game_events WHERE stage_id = ?`
+ไม่ส่งมาเลย (`undefined`) = รวมทุกด่านเหมือนพฤติกรรมเดิมก่อนรอบนี้ (backward compatible, ไม่กระทบ
+caller เดิมที่ไม่รู้จัก param ใหม่) `server.ts`'s `handleTelemetrySummary()` parse
+`?stage=1|2|3` จาก query string, whitelist เฉพาะค่า 1/2/3 (ค่าอื่น/ไม่มีค่า = `undefined` = ทุกด่าน)
+
+**ตั้งใจไม่กรอง**: `getErrorSummary()`/`getSystemMetricsSeries()` — CPU/RAM/ดิสก์ของเซิร์ฟเวอร์และ
+error log ไม่ใช่แนวคิดที่ผูกกับด่านที่ผู้เล่นกำลังเล่นอยู่ (เซิร์ฟเวอร์ตัวเดียวรันทุกด่านพร้อมกัน,
+error อาจเกิดจากโค้ดที่ใช้ร่วมกันทุกด่าน) กรองแยกตามด่านจะทำให้เข้าใจผิดว่ามันสัมพันธ์กับด่านโดยตรง
+
+**Dashboard**: dropdown "ทุกด่าน / ด่าน 1 (สุสานวิญญาณหลอน) / ด่าน 2 (ถ้ำเพลิงอเวจี) / ด่าน 3
+(ขุมนรกทมิฬศิลาดำ)" ในแถบ toolbar ข้าง "รีเฟรช" — เปลี่ยนค่าแล้ว fetch ใหม่ทันที (ไม่ต้องกดรีเฟรช
+เอง) `fetchSummary()` อ่านค่า dropdown ปัจจุบันทุกครั้งที่เรียก จึงทำงานถูกต้องร่วมกับ auto-refresh
+ทุก 30 วิเดิมโดยไม่ต้องแก้ auto-refresh logic เลย ส่วนที่ถูกกรอง ("สถิติการเล่นเกม",
+"สถิติการเลือกการ์ด") มีข้อความ "(ตามด่านที่เลือก)" ต่อท้ายหัวข้อ ส่วน "Error ที่ยังไม่แก้"
+(ในการ์ดภาพรวม, ไม่ถูกกรอง) มีข้อความ "(ทุกด่าน)" กำกับไว้กันสับสน เพราะอยู่ปนกับสถิติอื่นที่ถูกกรอง
+ในการ์ดชุดเดียวกัน
 
 ### 5.8 Stability Risk — Telemetry & Error Logging System
 
