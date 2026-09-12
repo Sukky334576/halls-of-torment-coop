@@ -76,6 +76,23 @@ describe('telemetryQueries', () => {
       expect(summary.deathCauses).toEqual([]);
     });
 
+    it('breaks down boss kills by bossName', () => {
+      seedEvent(db, 'boss_kill', { payload: { bossType: 5, bossName: 'Elite Golem', timeSinceSpawnMs: 1000, playersAliveAtKill: 2 } });
+      seedEvent(db, 'boss_kill', { payload: { bossType: 5, bossName: 'Elite Golem', timeSinceSpawnMs: 1000, playersAliveAtKill: 1 } });
+      seedEvent(db, 'boss_kill', { payload: { bossType: 9, bossName: 'Elite Void Guardian', timeSinceSpawnMs: 1000, playersAliveAtKill: 2 } });
+      const summary = getEventSummary(db);
+      expect(summary.bossKills).toEqual([
+        { bossName: 'Elite Golem', count: 2 },
+        { bossName: 'Elite Void Guardian', count: 1 }
+      ]);
+    });
+
+    it('falls back to bossType when bossName is missing from an older row', () => {
+      seedEvent(db, 'boss_kill', { payload: { bossType: 5, timeSinceSpawnMs: 1000, playersAliveAtKill: 2 } });
+      const summary = getEventSummary(db);
+      expect(summary.bossKills).toEqual([{ bossName: 'type 5', count: 1 }]);
+    });
+
     it('builds wave distribution from wave_reached events only', () => {
       seedEvent(db, 'wave_reached', { wave: 5 });
       seedEvent(db, 'wave_reached', { wave: 5 });

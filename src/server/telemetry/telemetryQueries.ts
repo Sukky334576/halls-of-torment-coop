@@ -12,10 +12,16 @@ export interface DeathCauseCount {
   count: number;
 }
 
+export interface BossKillCount {
+  bossName: string;
+  count: number;
+}
+
 export interface EventSummary {
   totalEvents: number;
   eventCounts: Record<string, number>;
   deathCauses: DeathCauseCount[];
+  bossKills: BossKillCount[];
   waveDistribution: Record<number, number>;
   runOutcomes: Record<string, number>;
   averagePlaytimeMs: number | null;
@@ -40,6 +46,7 @@ export function getEventSummary(db: Database.Database, stageId?: number): EventS
 
   const eventCounts: Record<string, number> = {};
   const deathCauseMap = new Map<string, number>();
+  const bossKillMap = new Map<string, number>();
   const waveDistribution: Record<number, number> = {};
   const runOutcomes: Record<string, number> = {};
   let totalPlaytimeMs = 0;
@@ -61,6 +68,14 @@ export function getEventSummary(db: Database.Database, stageId?: number): EventS
       const cause = payload.cause;
       const key = cause.monsterType !== undefined ? `${cause.sourceType}:${cause.monsterType}` : cause.sourceType;
       deathCauseMap.set(key, (deathCauseMap.get(key) || 0) + 1);
+    }
+
+    if (row.event_type === 'boss_kill') {
+      // bossName is a human label (e.g. "Elite Golem") logged alongside bossType (GameRoom.ts's
+      // logGameEvent('boss_kill', ...) call) — fall back to bossType if an older row predates
+      // bossName being added, so a schema-migration gap doesn't just drop the row silently.
+      const key = typeof payload?.bossName === 'string' ? payload.bossName : `type ${payload?.bossType ?? 'unknown'}`;
+      bossKillMap.set(key, (bossKillMap.get(key) || 0) + 1);
     }
 
     if (row.event_type === 'wave_reached' && row.wave !== null) {
@@ -87,10 +102,15 @@ export function getEventSummary(db: Database.Database, stageId?: number): EventS
     })
     .sort((a, b) => b.count - a.count);
 
+  const bossKills: BossKillCount[] = Array.from(bossKillMap.entries())
+    .map(([bossName, count]) => ({ bossName, count }))
+    .sort((a, b) => b.count - a.count);
+
   return {
     totalEvents: rows.length,
     eventCounts,
     deathCauses,
+    bossKills,
     waveDistribution,
     runOutcomes,
     averagePlaytimeMs: runEndCount > 0 ? Math.round(totalPlaytimeMs / runEndCount) : null,

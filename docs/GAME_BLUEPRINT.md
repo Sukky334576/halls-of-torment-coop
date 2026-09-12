@@ -29,6 +29,7 @@
 | 2026-09-12 | แก้ risk #27 (description กับ apply()/โค้ดจริงของ 5 การ์ดไม่ตรงกัน) — mark Refactor Roadmap #27 เป็น ✅ แก้แล้ว, sync กับ GAME_WIKI.md §4.7 | `docs/archive/2026-09-12-card-description-mismatch-fix.md` |
 | 2026-09-12 | พบและแก้ bug จาก user report: การ์ด card-stats/error-table ติดกันไม่มีช่องว่าง — ทั้งคู่เป็น direct child `.card` ของ `#dashboard` ไม่ได้ห่อในกริดเหมือนการ์ดอื่น เลยไม่ได้ spacing จาก grid gap แก้ด้วย scoped CSS `#dashboard > .card { margin-bottom: 20px; }` — ดู GAME_WIKI.md §5.7 Change Log | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | แก้ risk #28 (ไม่มี `vitest.config.ts` ทำให้ test count เพี้ยนจาก git worktree ของ session อื่นที่ทำงานขนานกัน — พบจาก session `card-list-documentation` ตรวจ archive spec #27 แล้วเจอตัวเลขรายงานผิด 293/293 ทั้งที่จริงคือ 93/93) — เพิ่ม `vitest.config.ts` exclude `.claude/**` | `docs/archive/2026-09-12-card-description-mismatch-fix.md` |
+| 2026-09-12 | User report: dashboard มีค่าที่วิเคราะห์/อ้างอิงอะไรไม่ได้ (ไม่มี N กำกับ, ซ่อน win/loss, ไม่แยกบอส) แก้ 5 จุดใน `admin/telemetry-dashboard.html` + เพิ่ม `bossKills` field ใหม่ใน `getEventSummary()` (`telemetryQueries.ts`) — ดู GAME_WIKI.md §5.7.6 | `docs/archive/2026-09-12-dashboard-clarity-fix.md` |
 >
 > สร้างเมื่อ 2026-09-11
 

@@ -29,6 +29,7 @@
 | 2026-09-12 | แก้ risk #27 (description กับ apply()/โค้ดจริงของ 5 การ์ดไม่ตรงกัน — พบจาก session `card-list-documentation`) — 2 ใบแก้โค้ด (`magnet_1` เพิ่ม expMultiplier, `gambler_fortune_greed` ให้ coin-drop chance scale ตาม rank), 2 ใบแก้ description (`commando_ap_rounds`, `cowboy_quick_draw`), 1 ใบไม่ต้องแก้ (`gambler_royal_flush` เป็น pattern ปกติของระบบ ไม่ใช่ bug) | `docs/archive/2026-09-12-card-description-mismatch-fix.md` |
 | 2026-09-12 | แก้ risk #28 (ไม่มี `vitest.config.ts` ทำให้ test count เพี้ยนจาก git worktree อื่นที่ทำงานขนานกัน — พบจาก session `card-list-documentation` ตรวจสอบ archive spec ก่อนหน้า) — เพิ่ม `vitest.config.ts` exclude `.claude/**`, ยืนยันตัวเลขจริง 93/93 คงที่ | `docs/archive/2026-09-12-card-description-mismatch-fix.md` |
 | 2026-09-12 | พบและแก้ bug จาก user report: การ์ด "สถิติการเลือกการ์ด" กับ "Error ที่เจอบ่อยที่สุด" ติดกันไม่มีช่องว่าง — root cause: ทั้งคู่เป็น `.card` เดียวที่อยู่เป็น direct child ของ `#dashboard` ตรงๆ (ไม่ได้ห่อด้วย `.grid--*` เหมือนการ์ดอื่นทุกใบ) เลยไม่ได้ spacing จาก grid `gap` แก้ด้วย CSS scoped rule `#dashboard > .card { margin-bottom: 20px; }` เลือก selector นี้เพราะกระทบแค่ 2 การ์ดนี้เท่านั้น (การ์ดอื่นทั้งหมดซ้อนอยู่ในกริดอีกชั้น ไม่ตรงกับ selector นี้) ไม่เสี่ยง double-spacing กับ `gap` ของกริดเดิม | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | User report: dashboard มีค่าที่ไม่รู้จะใช้อ้างอิง/วิเคราะห์อะไร แก้ 5 จุด — เพิ่ม win/loss breakdown ที่ "จำนวนเกมที่จบแล้ว", เพิ่ม N กำกับที่ "เวลาเล่นเฉลี่ย", เปลี่ยน pick-rate table ให้ไม่ไฮไลต์สีแถวที่ `timesOffered < 10` (⚠️ Correction §5.7.3), ตัด `level_up_choice`/`boss_kill` ออกจากกราฟ event-count (ซ้ำซ้อน/ไม่ actionable), เพิ่ม `bossKills` breakdown ใหม่ใน `getEventSummary()` + กราฟ "ฆ่าบอสสำเร็จ แยกตามตัวบอส" — ดู §5.7.6 | `docs/archive/2026-09-12-dashboard-clarity-fix.md` |
 
 ## สารบัญ
 
@@ -864,7 +865,10 @@ vitest (เช็ค `process.env.VITEST` ที่ vitest set ให้อั�
 ใครเลือก" เป็นคนละความหมายกัน ไม่ควรปนกัน
 
 Dashboard: table ใหม่ "สถิติการเลือกการ์ด" อยู่ใน `.table-scroll` (ดู §5.7.4) พร้อม color-code คอลัมน์
-อัตราเลือก (`.pick-low` แดง <15%, `.pick-high` เขียว ≥50%)
+อัตราเลือก (`.pick-low` แดง <15%, `.pick-high` เขียว ≥50%) **⚠️ Correction (2026-09-12, ดู §5.7.6)**:
+สีเดิมไม่สนใจว่า `timesOffered` มีกี่ครั้งเลย — การ์ดที่เสนอแค่ 2 ครั้งแล้วเลือก 2/2 (100%) เคยได้
+`.pick-high` เหมือนการ์ดที่มีข้อมูลจริง 40+ ครั้ง ตอนนี้แถวที่ `timesOffered < 10` จะไม่ไฮไลต์สีเลย
+(ใช้ `opacity: 0.45` แทน) มี legend อธิบายไว้เหนือตาราง
 
 ### 5.7.4 Layout Audit (`/impeccable layout`)
 
@@ -924,6 +928,24 @@ error อาจเกิดจากโค้ดที่ใช้ร่วม�
 "สถิติการเลือกการ์ด") มีข้อความ "(ตามด่านที่เลือก)" ต่อท้ายหัวข้อ ส่วน "Error ที่ยังไม่แก้"
 (ในการ์ดภาพรวม, ไม่ถูกกรอง) มีข้อความ "(ทุกด่าน)" กำกับไว้กันสับสน เพราะอยู่ปนกับสถิติอื่นที่ถูกกรอง
 ในการ์ดชุดเดียวกัน
+
+### 5.7.6 Dashboard Clarity Fix (2026-09-12)
+
+ที่มา: user report ตรง ("ดูแล้วก็ยังงงว่าจะเอามาใช้ทำไมบางค่า") — `docs/archive/2026-09-12-dashboard-clarity-fix.md`
+
+หลายค่าบน dashboard เป็น raw number ที่ไม่มี context ประกอบ ทำให้ตีความ/ใช้ตัดสินใจอะไรไม่ได้ แก้ 5 จุด:
+
+1. **"จำนวนเกมที่จบแล้ว"** — เพิ่ม sub-text แสดง breakdown ตาม outcome ทันที (เช่น `ชนะ 3 · แพ้ทั้งทีม
+   8 · ยอมแพ้ 1`) จากเดิมที่ต้องเลื่อนไปดู pie chart "ผลจบเกม" คนละ section ถึงจะเห็น
+2. **"เวลาเล่นเฉลี่ยต่อเกม"** — เพิ่ม sub-text `จาก N เกม` กันตีความค่าเฉลี่ยที่มาจากตัวอย่างน้อยผิดๆ
+3. **ตาราง "สถิติการเลือกการ์ด"** — เห็นใน §5.7.3 (⚠️ Correction ด้านบน)
+4. **ตัด `level_up_choice` ออกจากกราฟ "จำนวน Event แยกตามประเภท"** — raw count ไม่ actionable เอง
+   (breakdown จริงอยู่ในตาราง card pick stats อยู่แล้ว) ตัดด้วยเหตุผลเดียวกับที่ `wave_reached` เคยถูก
+   ตัดออกไปก่อนหน้านี้
+5. **เพิ่ม "ฆ่าบอสสำเร็จ (แยกตามตัวบอส)"** — `getEventSummary()` เดิมทิ้ง `payload.bossName` ของ event
+   `boss_kill` ไปเฉยๆ (นับรวมทุกบอสเป็นก้อนเดียว ทั้งที่ข้อมูลแยกบอสมีอยู่แล้วในทุก event) เพิ่ม field
+   `bossKills: { bossName, count }[]` ใหม่ (pattern เดียวกับ `deathCauses`) แล้วตัดบาร์รวมเดิมออกจาก
+   กราฟ "จำนวน Event แยกตามประเภท" ด้วย (ซ้ำซ้อนกับกราฟ breakdown ใหม่)
 
 ### 5.8 Stability Risk — Telemetry & Error Logging System
 
