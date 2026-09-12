@@ -241,3 +241,39 @@ Vite dev server บน local) ไม่ใช่ยิงตรงเข้า b
 
 `GAME_WIKI.md` (§5.7.1 แก้ URL + เพิ่มคำอธิบาย root cause, risk #25 อัปเดต, Change Log), `GAME_BLUEPRINT.md`
 (Roadmap #25 อัปเดต URL, Change Log)
+
+---
+
+## Round 3.2 — เปลี่ยนมาแก้ที่ nginx ตามที่ user เลือก (2026-09-12, ต่อจาก 3.1 ทันที)
+
+หลัง Round 3.1 อธิบายเหตุผลที่ใช้ `/api/` ให้ user ฟัง (ทางเลือก 1: ย้าย route เข้า `/api/` ไม่ต้องแก้
+nginx vs ทางเลือก 2: เพิ่ม nginx `location /admin/` เอง URL สะอาดกว่าแต่เสี่ยงกว่าเพราะแตะ shared
+infrastructure) user เลือกทางที่ 2
+
+### สิ่งที่ทำบน production (ระมัดระวังเป็นพิเศษเพราะแตะ nginx ที่คุมทั้งเว็บไซต์)
+
+1. Backup `/etc/nginx/sites-available/default` ก่อนแก้ทุกครั้ง (ไฟล์ timestamp)
+2. เพิ่ม `location /admin/` block ใหม่ (mirror รูปแบบ `location /api/` เดิมทุกอย่าง: proxy_pass ไป
+   `127.0.0.1:8080/admin/`, ใช้ `api_zone` rate limit เดียวกัน — ไม่ต้องประกาศ zone ใหม่)
+3. แก้ผ่าน Python script ที่เช็ค exact-match ของ anchor text ก่อนเขียนไฟล์ (fail ทันทีถ้า anchor ไม่ตรง
+   กันเขียนผิดไฟล์/ผิดจุดแบบเงียบๆ)
+4. `nginx -t` ยืนยัน syntax ถูกต้องก่อน reload ทุกครั้ง (ยังไม่ reload ตอนนี้ — รอ deploy โค้ดคู่กัน)
+5. `server.ts`: ย้าย route กลับจาก `/api/admin/telemetry/dashboard` เป็น `/admin/telemetry` ตามเดิม
+
+### Test
+
+- `npx tsc --noEmit` ✅, `npx vitest run` ✅ 73/73, `npm run build` ✅
+- Deploy คู่กัน (โค้ด + nginx reload) แล้ว verify ผ่าน nginx จริงอีกครั้ง (`curl` ที่ `127.0.0.1` ไม่ใช่
+  `:8080` ตรงๆ — บทเรียนจาก Round 3.1)
+
+### พบ risk ใหม่ระหว่างทำ
+
+nginx site config (`/etc/nginx/sites-available/default`) **ไม่ได้อยู่ใน git repo เลย** — ทุกครั้งที่
+เพิ่ม route ใหม่ที่ต้องพึ่ง nginx (แบบรอบนี้) ต้องจำไว้เองว่าต้องไปแก้ config บน production ด้วย ไม่ใช่
+แค่ push โค้ดแอปแล้วจบ (บันทึกเป็น risk #26 ใหม่ — GAME_WIKI.md §5.8/§6, GAME_BLUEPRINT.md B.5)
+
+### เอกสารที่อัปเดตเพิ่ม
+
+`GAME_WIKI.md` (§5.7.1 แก้ URL กลับเป็น `/admin/telemetry` + อธิบาย nginx block ใหม่, risk #25
+อัปเดต + risk #26 ใหม่, §5.8 เพิ่ม bullet nginx-not-in-git, Change Log), `GAME_BLUEPRINT.md`
+(Roadmap #25 อัปเดต + #26 ใหม่, Change Log)
