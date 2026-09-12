@@ -81,6 +81,8 @@
   .status-fixed { color: #6bcf6b; }
   .pick-low { color: #ff6b6b; }
   .pick-high { color: #6bcf6b; }
+  .table-note { font-size: 12px; color: #8a8a97; margin: -4px 0 12px; }
+  tr.low-confidence { opacity: 0.45; }
   .empty-note { color: #8a8a97; font-size: 13px; text-align: center; padding: 40px 0; }
   [hidden] { display: none !important; }
 </style>
@@ -129,10 +131,12 @@
     <div class="card">
       <h2>จำนวนเกมที่จบแล้ว</h2>
       <div class="stat-value" id="stat-total-runs">—</div>
+      <div class="stat-sub" id="stat-total-runs-sub"></div>
     </div>
     <div class="card">
       <h2>เวลาเล่นเฉลี่ยต่อเกม</h2>
       <div class="stat-value" id="stat-avg-playtime">—</div>
+      <div class="stat-sub" id="stat-avg-playtime-sub"></div>
     </div>
     <div class="card">
       <h2>Error ที่ยังไม่แก้ (ทุกด่าน)</h2>
@@ -195,6 +199,10 @@
       <canvas id="chart-wave-dist"></canvas>
     </div>
     <div class="card">
+      <h2>ฆ่าบอสสำเร็จ (แยกตามตัวบอส)</h2>
+      <canvas id="chart-boss-kills"></canvas>
+    </div>
+    <div class="card">
       <h2>ผลจบเกม</h2>
       <canvas id="chart-outcomes"></canvas>
     </div>
@@ -202,6 +210,7 @@
 
   <div class="card">
     <h2>สถิติการเลือกการ์ด (ตามด่านที่เลือก, เรียงจากเลือกน้อยสุด — ไว้ดูว่าการ์ดไหนควรปรับสมดุล)</h2>
+    <p class="table-note">แถวที่ "เสนอ" น้อยกว่า 10 ครั้ง จะแสดงจางไว้ — ตัวอย่างน้อยเกินไป อัตราเลือกยังเชื่อถือไม่ได้</p>
     <div class="table-scroll">
       <table id="card-stats-table">
         <thead>
@@ -431,17 +440,23 @@ function renderCardStats(cardStats) {
   tbody.innerHTML = '';
   const stats = cardStats || [];
   empty.hidden = stats.length > 0;
+  // Below this many offers, pickRatePct swings wildly on a single roll (e.g. 1/2 offers reads as
+  // a dramatic 50%) and isn't a reliable signal for balance decisions — dim the row instead of
+  // color-coding it as if it were as trustworthy as a card offered dozens of times.
+  const LOW_CONFIDENCE_THRESHOLD = 10;
   for (const card of stats) {
     // Same textContent-only rule as the error table below — card.name ultimately comes from
     // TRAIT_POOL (static game data, not user input) so it's not actually attacker-reachable, but
     // there's no reason to treat DB-sourced rendering differently just because this particular
     // field happens to be safe today.
     const tr = document.createElement('tr');
+    const lowConfidence = card.timesOffered < LOW_CONFIDENCE_THRESHOLD;
+    if (lowConfidence) tr.className = 'low-confidence';
     const cells = [card.name, labelFor(RARITY_LABELS, card.rarity), String(card.timesOffered), String(card.timesPicked), card.pickRatePct + '%'];
     cells.forEach((text, i) => {
       const td = document.createElement('td');
       td.textContent = text;
-      if (i === 4) td.className = card.pickRatePct < 15 ? 'pick-low' : card.pickRatePct >= 50 ? 'pick-high' : '';
+      if (i === 4) td.className = lowConfidence ? '' : card.pickRatePct < 15 ? 'pick-low' : card.pickRatePct >= 50 ? 'pick-high' : '';
       tr.appendChild(td);
     });
     tbody.appendChild(tr);
@@ -457,6 +472,7 @@ function renderDashboard(data) {
   document.getElementById('last-updated').textContent = 'อัปเดตล่าสุด: ' + new Date().toLocaleString('th-TH');
   document.getElementById('stat-total-runs').textContent = events.totalRunEnds;
   document.getElementById('stat-avg-playtime').textContent = formatMs(events.averagePlaytimeMs);
+  document.getElementById('stat-avg-playtime-sub').textContent = `จาก ${events.totalRunEnds} เกม`;
   document.getElementById('stat-open-errors').textContent = errors.openCount;
   document.getElementById('stat-error-sub').textContent = `แก้แล้ว ${errors.fixedCount} / รวมทั้งหมด ${errors.totalSignatures} รายการ`;
   document.getElementById('stat-total-events').textContent = events.totalEvents;
@@ -465,7 +481,14 @@ function renderDashboard(data) {
   // per run — plotted together, wave_reached's bar dwarfs the others and makes them unreadable.
   // It already has its own dedicated chart below ("เวฟที่ผู้เล่นไปถึง"), so dropping it here loses
   // no information, just the noise that was drowning out the more decision-relevant event types.
-  const eventCountEntries = objEntries(events.eventCounts).filter(([type]) => type !== 'wave_reached');
+  // level_up_choice is dropped for the same reason: a raw "how many choices happened" count isn't
+  // actionable by itself — the useful breakdown (which card, offered vs picked) is already its own
+  // table below ("สถิติการเลือกการ์ด"). boss_kill is dropped too — a single count lumps every boss
+  // together with no way to tell which one; its own breakdown chart ("ฆ่าบอสสำเร็จ แยกตามตัวบอส")
+  // below replaces it.
+  const eventCountEntries = objEntries(events.eventCounts).filter(
+    ([type]) => type !== 'wave_reached' && type !== 'level_up_choice' && type !== 'boss_kill'
+  );
   barChart('chart-event-counts', eventCountEntries.map((e) => labelFor(EVENT_TYPE_LABELS, e[0])), eventCountEntries.map((e) => e[1]));
 
   const deathLabels = events.deathCauses.map((d) => {
@@ -477,10 +500,17 @@ function renderDashboard(data) {
   const waveEntries = objEntries(events.waveDistribution).sort((a, b) => Number(a[0]) - Number(b[0]));
   barChart('chart-wave-dist', waveEntries.map((e) => 'เวฟ ' + e[0]), waveEntries.map((e) => e[1]), '#118ab2');
 
+  barChart('chart-boss-kills', events.bossKills.map((b) => b.bossName), events.bossKills.map((b) => b.count), '#a855f7');
+
   renderCardStats(data.cardStats);
 
   const outcomeEntries = objEntries(events.runOutcomes);
   pieChart('chart-outcomes', outcomeEntries.map((e) => labelFor(OUTCOME_LABELS, e[0])), outcomeEntries.map((e) => e[1]));
+  // Surfaced next to "จำนวนเกมที่จบแล้ว" too (not just the pie chart further down) so the win/loss
+  // split — the single most decision-relevant fact about that count — isn't hidden behind a scroll.
+  document.getElementById('stat-total-runs-sub').textContent = outcomeEntries
+    .map(([type, count]) => `${labelFor(OUTCOME_LABELS, type)} ${count}`)
+    .join(' · ');
 
   const tbody = document.getElementById('error-table-body');
   tbody.innerHTML = '';
