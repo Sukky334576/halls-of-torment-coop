@@ -159,6 +159,10 @@ export interface SystemMetricPoint {
   hostMemTotalMb: number;
   processCpuPct: number;
   processRssMb: number;
+  // Nullable — rows written before disk tracking was added have neither, and getDiskUsage()
+  // itself returns null if statfs isn't available (see SystemMetricsSampler).
+  diskUsedMb: number | null;
+  diskTotalMb: number | null;
 }
 
 /** Returns the most recent `maxPoints` samples, oldest first (chart-ready order) — bounds the
@@ -169,7 +173,8 @@ export interface SystemMetricPoint {
 export function getSystemMetricsSeries(db: Database.Database, maxPoints: number = 500): SystemMetricPoint[] {
   const rows = db
     .prepare(
-      `SELECT host_cpu_pct, host_mem_used_mb, host_mem_total_mb, process_cpu_pct, process_rss_mb, created_at
+      `SELECT host_cpu_pct, host_mem_used_mb, host_mem_total_mb, process_cpu_pct, process_rss_mb,
+              disk_used_mb, disk_total_mb, created_at
        FROM system_metrics ORDER BY created_at DESC LIMIT ?`
     )
     .all(maxPoints) as {
@@ -178,6 +183,8 @@ export function getSystemMetricsSeries(db: Database.Database, maxPoints: number 
     host_mem_total_mb: number;
     process_cpu_pct: number;
     process_rss_mb: number;
+    disk_used_mb: number | null;
+    disk_total_mb: number | null;
     created_at: number;
   }[];
 
@@ -187,6 +194,8 @@ export function getSystemMetricsSeries(db: Database.Database, maxPoints: number 
     hostMemUsedMb: r.host_mem_used_mb,
     hostMemTotalMb: r.host_mem_total_mb,
     processCpuPct: r.process_cpu_pct,
+    diskUsedMb: r.disk_used_mb,
+    diskTotalMb: r.disk_total_mb,
     processRssMb: r.process_rss_mb
   }));
 }

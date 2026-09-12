@@ -330,3 +330,71 @@ assertion)
 
 `GAME_WIKI.md` (§5.7.2 ใหม่ทั้งหมด, risk #24 ขยายให้ครอบคลุม `system_metrics`, Change Log),
 `GAME_BLUEPRINT.md` (B.4 entity ใหม่ `system_metrics`, Change Log)
+
+---
+
+## Round 5 — Disk space, auto-refresh, และ race condition ตัวจริง (2026-09-12, ต่อจาก Round 4 ทันที)
+
+User ถาม "พื้นที่หล่ะ" (ขอ disk space เพิ่มเข้า System Metrics) แล้วถามต่อว่า dashboard realtime
+ไหม/fetch ทุกกี่นาที — อธิบายว่า dashboard นี้แยก route/DB จากเกมเลย ไม่กระทบ resource เกมแม้แต่น้อย
+เสนอ auto-refresh 30 วิ (ตรงกับ sampler) + หยุดตอนสลับแท็บ user ตกลง
+
+### Disk space
+
+- Schema: เพิ่ม `disk_used_mb`/`disk_total_mb` (nullable) เข้า `system_metrics` — **แต่ table นี้
+  deploy ไปแล้วจริงบน production ตั้งแต่ Round 4** เขียน `ensureColumn()` helper ใหม่ใน
+  `telemetryDb.ts` (เช็ค `PRAGMA table_info` ก่อน `ALTER TABLE ADD COLUMN` เฉพาะคอลัมน์ที่ยังไม่มี)
+  แทนที่จะแค่แก้ `CREATE TABLE` statement เฉยๆ (ซึ่งจะไม่มีผลกับตารางที่มีอยู่แล้วเพราะ
+  `IF NOT EXISTS`) — เขียน test คู่ (`telemetryDb.test.ts` ใหม่) จำลอง DB จริงที่สร้างด้วย schema
+  เก่า (ไม่มี disk column) แล้วเปิดผ่าน `createTelemetryConnection()` จริง ยืนยันว่า migrate สำเร็จ
+  โดยแถวเดิมไม่หาย + insert ใหม่ด้วยคอลัมน์ใหม่ได้จริง
+- `SystemMetricsSampler.getDiskUsage()` ใช้ `fs.statfsSync()` บน directory ที่ `telemetry.db` เองอยู่
+  (จาก `db.name`) คืน `null` ถ้าใช้ไม่ได้ (เช่น `:memory:` ตอนเทส) แทนที่จะทำให้ sample พังทั้งแถว
+- Dashboard: stat card ที่ 5 "พื้นที่ดิสก์" + chart ที่ 3 "พื้นที่ดิสก์ตามเวลา (%)"
+
+### Auto-refresh
+
+Poll ทุก 30 วิ (`AUTO_REFRESH_MS`) ตรงกับความถี่ sampler เอง (poll ถี่กว่านั้นแค่ดึงข้อมูลซ้ำเดิม
+เปล่าๆ) หยุดอัตโนมัติด้วย `document.visibilitychange` เมื่อสลับแท็บ ไม่ต้องกังวลเรื่อง resource เกม
+เพราะ dashboard อยู่คนละ route/DB กับตัวเกมเลย (`/admin/telemetry` vs game client, `telemetry.db` vs
+`game.db`) — **พบบั๊กเล็กในโค้ดตัวเองระหว่างเขียน**: เผลอเช็ค `dashboard.hidden` (state UI
+gate-vs-dashboard) แทนที่จะเป็น `document.hidden` (tab visibility จริง) ในตัว interval callback —
+แก้ก่อน commit
+
+**Test ผ่าน browser จริง**: simulate `document.hidden`/`visibilityState` ผ่าน
+`Object.defineProperty` + dispatch `visibilitychange` event เอง (เพราะ automated browser pane
+ที่ใช้ทดสอบ ตัว tab เองรายงาน `document.hidden: true` — ไม่ใช่ user จริงที่เปิดแท็บดู) ยืนยันว่า
+timer เริ่มทำงานถูกและ refetch ทันที รอจริง ~90 วิเห็น timestamp ขยับเอง 2 รอบโดยไม่ต้องกดปุ่ม
+ยืนยัน interval ทำงานจริง ไม่ใช่แค่ one-shot
+
+### 🐛 พบและแก้ race condition จริงในชุด test ทั้งหมด (สำคัญที่สุดของรอบนี้ — ไม่ใช่แค่ feature นี้)
+
+ระหว่างรัน `npx vitest run` ซ้ำๆ เจอ `SqliteError: database is locked` เป็นครั้งคราวมาตลอด**ทั้ง
+เซสชัน** (เข้าใจผิดว่าเป็น "transient flake" หลายรอบ ไม่เคยขุดจริงจัง) รอบนี้ reproduce ซ้ำได้แน่นอน
+หลังเพิ่ม `ALTER TABLE` migration (เปิดโอกาสชนกันมากกว่า `CREATE TABLE IF NOT EXISTS` เดิมมาก) —
+root cause จริง: `telemetryDb.ts`'s module-level singleton
+(`export const telemetryDb = createTelemetryConnection()`) เปิดไฟล์ `data/telemetry.dev.db` จริง
+เป็น side effect ทันทีที่ import — ทุก test file ที่ import อะไรก็ตามที่พาดพิง
+`TelemetryBuffer.ts`/`telemetryDb.ts` (ทางตรงหรือทางอ้อม ผ่าน `GameRoom.ts` เป็นต้น) trigger การ
+เปิดไฟล์เดียวกันนี้ vitest รันหลาย test file พร้อมกันคนละ worker แย่งเปิด/migrate ไฟล์เดียวกันจริง
+
+**แก้**: ให้ singleton สลับไปใช้ `:memory:` แทนเมื่อ `process.env.VITEST` (vitest set ให้อัตโนมัติ)
+ไม่มี test ไหนใช้ singleton ตัวนี้ตรงๆ อยู่แล้ว (ทุก test สร้าง connection เองผ่าน
+`createTelemetryConnection(':memory:')`) ปัญหาคือแค่ import module เฉยๆ ก็ trigger side effect
+นี้ไปแล้ว — ยืนยันด้วยการรัน `npx vitest run` ซ้ำ 15+ ครั้งติดกันหลังแก้ ไม่มี fail อีกเลยสักครั้ง
+(ก่อนแก้ reproduce ได้ ~1 ใน 3-5 ครั้ง)
+
+### Test
+
+- `npx tsc --noEmit` ✅
+- `npx vitest run` ✅ **81/81** รันซ้ำ 15+ ครั้งติดกันไม่มี fail เลย (เทียบกับก่อนแก้ที่ fail
+  เป็นระยะ) — เพิ่ม 4 test ใหม่ (2 ใน `telemetryDb.test.ts` ใหม่สำหรับ migration, 1 ใน
+  `telemetryQueries.test.ts` สำหรับ disk field passthrough, ปรับ `seedMetric` helper เดิม)
+- `npm run build` ✅
+- Manual E2E: seed sample จริงเห็น disk field ค่าสมเหตุสมผล (`202.3 / 228.3 GB`), เปิด dashboard
+  จริงเห็น stat card + chart ที่ 3 แสดงถูกต้อง, ยืนยัน auto-refresh ทำงานจริงตามที่อธิบายด้านบน
+
+### เอกสารที่อัปเดต
+
+`GAME_WIKI.md` (§5.7.2 หัวข้อเปลี่ยนเป็น "CPU/RAM/Disk", เพิ่มรายละเอียด disk/auto-refresh/schema
+migration/race-condition fix, Change Log), `GAME_BLUEPRINT.md` (Change Log)

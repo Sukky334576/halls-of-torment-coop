@@ -124,12 +124,21 @@ describe('telemetryQueries', () => {
   });
 
   describe('getSystemMetricsSeries', () => {
-    function seedMetric(createdAt: number, hostCpuPct: number): void {
+    function seedMetric(createdAt: number, hostCpuPct: number, diskUsedMb: number | null = 5000): void {
       db.prepare(
-        `INSERT INTO system_metrics (host_cpu_pct, host_mem_used_mb, host_mem_total_mb, process_cpu_pct, process_rss_mb, created_at)
-         VALUES (?, 100, 1000, 5, 30, ?)`
-      ).run(hostCpuPct, createdAt);
+        `INSERT INTO system_metrics (host_cpu_pct, host_mem_used_mb, host_mem_total_mb, process_cpu_pct, process_rss_mb, disk_used_mb, disk_total_mb, created_at)
+         VALUES (?, 100, 1000, 5, 30, ?, 10000, ?)`
+      ).run(hostCpuPct, diskUsedMb, createdAt);
     }
+
+    it('passes through disk fields, including null for rows written before disk tracking existed', () => {
+      seedMetric(1000, 10, 5000);
+      seedMetric(2000, 20, null);
+      const series = getSystemMetricsSeries(db);
+      expect(series[0].diskUsedMb).toBe(5000);
+      expect(series[0].diskTotalMb).toBe(10000);
+      expect(series[1].diskUsedMb).toBeNull();
+    });
 
     it('returns points oldest-first, ready for a chart x-axis', () => {
       seedMetric(3000, 30);

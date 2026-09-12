@@ -106,6 +106,10 @@
       <h2>RAM ของเกม (Process)</h2>
       <div class="stat-value" id="stat-proc-mem">—</div>
     </div>
+    <div class="card">
+      <h2>พื้นที่ดิสก์ (Host)</h2>
+      <div class="stat-value" id="stat-disk">—</div>
+    </div>
   </div>
   <div class="grid" id="system-charts-grid">
     <div class="card">
@@ -115,6 +119,10 @@
     <div class="card">
       <h2>การใช้ RAM ตามเวลา (MB)</h2>
       <canvas id="chart-mem-history"></canvas>
+    </div>
+    <div class="card">
+      <h2>พื้นที่ดิสก์ตามเวลา (%)</h2>
+      <canvas id="chart-disk-history"></canvas>
     </div>
   </div>
   <div id="system-empty" class="empty-note" hidden>ยังไม่มีข้อมูล — เซิร์ฟเวอร์เก็บตัวอย่างแรกทุก 30 วินาที รอสักครู่แล้วกด "รีเฟรช"</div>
@@ -312,7 +320,7 @@ function renderSystemHealth(system) {
   if (!system || system.length === 0) {
     grid.hidden = true;
     empty.hidden = false;
-    for (const id of ['stat-host-cpu', 'stat-host-mem', 'stat-proc-cpu', 'stat-proc-mem']) {
+    for (const id of ['stat-host-cpu', 'stat-host-mem', 'stat-proc-cpu', 'stat-proc-mem', 'stat-disk']) {
       document.getElementById(id).textContent = '—';
     }
     return;
@@ -325,6 +333,12 @@ function renderSystemHealth(system) {
   document.getElementById('stat-host-mem').textContent = `${latest.hostMemUsedMb} / ${latest.hostMemTotalMb} MB`;
   document.getElementById('stat-proc-cpu').textContent = latest.processCpuPct + '%';
   document.getElementById('stat-proc-mem').textContent = latest.processRssMb + ' MB';
+  // diskUsedMb/diskTotalMb are null on platforms where fs.statfsSync() isn't available/failed
+  // (see SystemMetricsSampler.getDiskUsage), or on rows written before disk tracking existed.
+  document.getElementById('stat-disk').textContent =
+    latest.diskUsedMb !== null && latest.diskTotalMb !== null
+      ? `${(latest.diskUsedMb / 1024).toFixed(1)} / ${(latest.diskTotalMb / 1024).toFixed(1)} GB`
+      : 'ไม่มีข้อมูล';
 
   const timeLabels = system.map((p) => formatTime(p.createdAt));
   lineChart(
@@ -344,6 +358,18 @@ function renderSystemHealth(system) {
       { label: 'RAM ของเกม (Process) MB', data: system.map((p) => p.processRssMb), borderColor: '#ef476f', yAxisID: 'y1' }
     ],
     true
+  );
+  lineChart(
+    'chart-disk-history',
+    timeLabels,
+    [
+      {
+        label: 'พื้นที่ดิสก์ใช้ไป %',
+        data: system.map((p) => (p.diskUsedMb !== null && p.diskTotalMb ? Math.round((p.diskUsedMb / p.diskTotalMb) * 1000) / 10 : null)),
+        borderColor: '#f97316'
+      }
+    ],
+    false
   );
 }
 
@@ -448,11 +474,42 @@ document.getElementById('secret-input').addEventListener('keydown', (e) => {
 });
 document.getElementById('refresh-btn').addEventListener('click', fetchSummary);
 
+// Auto-refresh every 30s — matches SystemMetricsSampler's own sampling cadence (server.ts), so
+// polling faster would just re-fetch the same data with nothing new to show. Paused while the
+// tab isn't visible (switched away/minimized) so a dashboard left open in a background tab
+// doesn't keep polling for no one to see — resumes (with an immediate refetch, not waiting out
+// a stale interval) as soon as the tab is looked at again.
+const AUTO_REFRESH_MS = 30_000;
+let autoRefreshTimer = null;
+
+function startAutoRefresh() {
+  if (autoRefreshTimer || document.hidden) return; // the visibilitychange listener starts this
+  // itself the moment the tab becomes visible — nothing to schedule while it's still hidden.
+  autoRefreshTimer = setInterval(fetchSummary, AUTO_REFRESH_MS);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopAutoRefresh();
+  } else {
+    startAutoRefresh();
+    fetchSummary(); // catch up immediately rather than waiting up to 30s for the next tick
+  }
+});
+
 if (getStoredSecret()) {
   fetchSummary();
 } else {
   showGate('');
 }
+startAutoRefresh();
 </script>
 </body>
 </html>

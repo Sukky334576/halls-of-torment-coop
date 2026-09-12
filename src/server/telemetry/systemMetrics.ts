@@ -1,4 +1,6 @@
 import os from 'os';
+import fs from 'fs';
+import path from 'path';
 import type Database from 'better-sqlite3';
 
 /** Samples host (VPS) and process (this game-server) CPU/RAM on a timer and writes one row per
@@ -15,9 +17,35 @@ export class SystemMetricsSampler {
   constructor(private db: Database.Database) {
     this.insertStmt = db.prepare(`
       INSERT INTO system_metrics
-        (host_cpu_pct, host_mem_used_mb, host_mem_total_mb, process_cpu_pct, process_rss_mb, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+        (host_cpu_pct, host_mem_used_mb, host_mem_total_mb, process_cpu_pct, process_rss_mb,
+         disk_used_mb, disk_total_mb, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
+  }
+
+  /** Disk space of the filesystem holding telemetry.db itself — the disk that actually matters
+   * for whether this data can keep growing (see risk #24: no retention/prune policy yet).
+   * `better-sqlite3`'s Database exposes the path it was opened with via `.name`; for an
+   * in-memory DB (unit tests) that's the literal string ':memory:', which has no real
+   * filesystem to statfs — falls back to `process.cwd()` there, and returns null entirely if
+   * `fs.statfsSync` isn't available/fails for any other reason (e.g. an unsupported platform)
+   * rather than let a disk-space failure take down the whole sample. */
+  private getDiskUsage(): { usedMb: number; totalMb: number } | null {
+    try {
+      const dbPath = this.db.name;
+      const dirToCheck = dbPath && dbPath !== ':memory:' ? path.dirname(dbPath) : process.cwd();
+      const stats = fs.statfsSync(dirToCheck);
+      const totalBytes = stats.blocks * stats.bsize;
+      // bavail (not bfree) excludes blocks reserved for root — the figure that reflects what
+      // this (non-root) process can actually still write.
+      const availableBytes = stats.bavail * stats.bsize;
+      return {
+        totalMb: Math.round(totalBytes / (1024 * 1024)),
+        usedMb: Math.round((totalBytes - availableBytes) / (1024 * 1024))
+      };
+    } catch {
+      return null;
+    }
   }
 
   /** % of all cores busy (0-100) since the last call — null on the very first call, since there's
@@ -69,8 +97,18 @@ export class SystemMetricsSampler {
     const hostMemTotalMb = Math.round(os.totalmem() / (1024 * 1024));
     const hostMemFreeMb = Math.round(os.freemem() / (1024 * 1024));
     const processRssMb = Math.round(process.memoryUsage().rss / (1024 * 1024));
+    const disk = this.getDiskUsage();
 
-    this.insertStmt.run(hostCpuPct, hostMemTotalMb - hostMemFreeMb, hostMemTotalMb, processCpuPct, processRssMb, Date.now());
+    this.insertStmt.run(
+      hostCpuPct,
+      hostMemTotalMb - hostMemFreeMb,
+      hostMemTotalMb,
+      processCpuPct,
+      processRssMb,
+      disk?.usedMb ?? null,
+      disk?.totalMb ?? null,
+      Date.now()
+    );
   }
 
   start(intervalMs: number): void {

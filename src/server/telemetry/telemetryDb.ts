@@ -63,10 +63,25 @@ const SCHEMA_SQL = `
     host_mem_total_mb INTEGER NOT NULL,
     process_cpu_pct   REAL NOT NULL,
     process_rss_mb    INTEGER NOT NULL,
+    disk_used_mb      INTEGER,
+    disk_total_mb     INTEGER,
     created_at        INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_system_metrics_created ON system_metrics(created_at);
 `;
+
+/** Adds `column` to `table` if it isn't there yet — for columns introduced after a table already
+ * shipped (disk_used_mb/disk_total_mb landed after system_metrics was already live on
+ * production). `CREATE TABLE IF NOT EXISTS` alone would silently skip re-creating an existing
+ * table, leaving old deployments on the pre-migration schema and failing on the next insert that
+ * references the new column. Nullable/no-default columns only — SQLite can't ADD COLUMN NOT NULL
+ * without a DEFAULT on a table that may already have rows. */
+function ensureColumn(db: Database.Database, table: string, column: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!columns.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
 
 /** Opens (and schema-initializes) a telemetry SQLite connection. Exported — not just used for
  * the production singleton below — so tests can point this at ':memory:' and get the exact same
@@ -74,8 +89,21 @@ const SCHEMA_SQL = `
 export function createTelemetryConnection(dbPath: string = DEFAULT_DB_PATH): Database.Database {
   const db = new Database(dbPath);
   db.exec(SCHEMA_SQL);
+  ensureColumn(db, 'system_metrics', 'disk_used_mb', 'INTEGER');
+  ensureColumn(db, 'system_metrics', 'disk_total_mb', 'INTEGER');
   return db;
 }
 
-export const telemetryDb = createTelemetryConnection();
-console.log(`📊 Telemetry database: ${DEFAULT_DB_PATH}`);
+// Under vitest, use a private in-memory DB instead of the real dev-DB file. No test actually
+// reads/writes through this singleton — every test that needs a DB makes its own via
+// createTelemetryConnection(':memory:') — but merely IMPORTING this module (transitively, via
+// TelemetryBuffer.ts/server.ts) already runs this line as a side effect. With the real file,
+// multiple test files running in parallel vitest workers all opened + migrated (ALTER TABLE) the
+// SAME on-disk file concurrently, intermittently throwing 'SqliteError: database is locked' —
+// found via a real, reproducible failure (not a flake) once this file gained an ALTER TABLE
+// migration step, which is far more collision-prone than the plain CREATE TABLE IF NOT EXISTS
+// this had before.
+export const telemetryDb = process.env.VITEST ? createTelemetryConnection(':memory:') : createTelemetryConnection();
+if (!process.env.VITEST) {
+  console.log(`📊 Telemetry database: ${DEFAULT_DB_PATH}`);
+}

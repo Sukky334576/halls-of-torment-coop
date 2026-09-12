@@ -21,6 +21,7 @@
 | 2026-09-12 | หลัง deploy รอบแรกของ dashboard เปิดหน้าไม่ได้จริง — root cause: route เดิม `/admin/telemetry` อยู่นอก `/api/` ที่ nginx proxy มา Node เลยโดน SPA catch-all ของ game client เสิร์ฟหน้า login แทนเงียบๆ ย้าย route มาเป็น `/api/admin/telemetry/dashboard` แทน ไม่ต้องแก้ nginx | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | เพิ่ม `location /admin/` block ใหม่ใน nginx site config บน production (mirror `/api/` เดิม) แล้วย้าย dashboard route กลับมาที่ `/admin/telemetry` ตามที่ user ต้องการ (URL สะอาดกว่า) เพิ่ม risk ใหม่ #26 (nginx config ไม่ได้อยู่ใน git) | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | ทำ dashboard เป็นภาษาไทยเป็นหลัก (ตรวจ `I18n.ts`/`classes.ts`/`HUD.ts` ก่อนแปล ใช้คำเดิมที่เกมมีอยู่แล้วสำหรับ outcome, บัญญัติคำใหม่เฉพาะ rarity ที่เกมเองก็ไม่มีคำไทย) + เพิ่มระบบ System Metrics (CPU/RAM ทั้ง host และ process ใหม่ทั้งหมด — ดู §5.7.2) พบและแก้ edge case จาก unit test: `computeProcessCpuPercent()` return `null` ผิดตอน delta เวลาเป็นศูนย์ ทำแถวทั้งแถวหายไปทั้งที่ข้อมูลอื่นวัดได้ปกติ | `docs/archive/2026-09-11-telemetry-error-logging.md` |
+| 2026-09-12 | เพิ่ม disk space เข้า System Metrics (`fs.statfsSync`) + auto-refresh 30 วิบน dashboard (หยุดตอนสลับแท็บ) — ต้อง migrate schema `system_metrics` ที่ deploy ไปแล้ว (`ensureColumn()` ใหม่) พบและแก้ **race condition จริงในชุด test ทั้งหมด** (ไม่ใช่แค่ feature นี้): module-level singleton เปิดไฟล์ dev DB จริงเป็น side effect ของการ import ชนกันข้าม vitest worker ได้ `database is locked` — เคยเข้าใจผิดว่าเป็น flake มาหลายรอบ | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 
 ## สารบัญ
 
@@ -759,7 +760,7 @@ dashboard เห็น `<img>` tag render ตรงๆ ไม่ใช่ text �
 whitelist ที่ `server.ts`'s ingest endpoint ปฏิเสธ category/event_type ที่ไม่อยู่ใน enum จริง
 (defense-in-depth ชั้นที่สอง กันไม่ให้ค่าแปลกๆ เข้า DB เลย ไม่ต้องพึ่งแค่การ render ฝั่ง client ให้ถูก)
 
-### 5.7.2 System Metrics (CPU/RAM)
+### 5.7.2 System Metrics (CPU/RAM/Disk)
 
 ที่มา: `src/server/telemetry/systemMetrics.ts` (ใหม่), เพิ่ม field ใน `telemetryQueries.ts`
 
@@ -779,15 +780,42 @@ performance เลย
   CPU/RAM ยังวัดได้ปกติ แก้เป็น return `0` แทน (มี baseline จริง แค่ยังไม่มีเวลาผ่านไปพอจะวัด ไม่ใช่
   "ไม่มีข้อมูล")
 - Memory — `os.totalmem()/os.freemem()` (host), `process.memoryUsage().rss` (process) หน่วย MB
+- Disk — `fs.statfsSync()` บน directory ที่ `telemetry.db` เองอยู่ (อ่านจาก `better-sqlite3`'s
+  `db.name`) ใช้ `bavail` (ไม่ใช่ `bfree`) เพราะไม่รวม block ที่กันไว้สำหรับ root ตรงกับพื้นที่ที่
+  process จริงเขียนได้จริง — เกี่ยวข้องตรงกับ risk #24 (ไม่มี retention policy) เพราะเป็นตัวเช็คว่า
+  ข้อมูลที่โตไม่มีเพดานนี้กำลังกินพื้นที่ดิสก์แค่ไหนจริง `null` ถ้า `fs.statfsSync` ใช้ไม่ได้ (เช่น
+  `:memory:` DB ตอนเทส) หรือ platform ไม่รองรับ — ไม่ทำให้ sample ทั้งแถวพังเหมือนที่เคยเป็นปัญหากับ
+  CPU ด้านบน
 
-**Dashboard**: section ใหม่ "🖥️ สุขภาพเซิร์ฟเวอร์" ใน `/admin/telemetry` — stat card 4 ใบ (ค่าล่าสุด)
-+ line chart 2 อัน (CPU ตามเวลา, RAM ตามเวลา — RAM ใช้ dual y-axis เพราะ host กับ process หน่วยต่างกัน
-มาก เช่น 8000MB vs 60MB) มี empty-state ถ้ายังไม่มี sample เลย (รอ 30 วิแรกหลัง deploy/restart)
+**Dashboard**: section ใหม่ "🖥️ สุขภาพเซิร์ฟเวอร์" ใน `/admin/telemetry` — stat card 5 ใบ (ค่าล่าสุด:
+host CPU/RAM, process CPU/RAM, disk) + line chart 3 อัน (CPU ตามเวลา, RAM ตามเวลา — dual y-axis
+เพราะ host/process หน่วยต่างกันมาก, พื้นที่ดิสก์ตามเวลา %) มี empty-state ถ้ายังไม่มี sample เลย (รอ
+30 วิแรกหลัง deploy/restart) **Auto-refresh ทุก 30 วิ** (ตรงกับ sampler เอง — poll ถี่กว่านั้นก็ได้
+ข้อมูลซ้ำเดิม) **หยุด poll อัตโนมัติเมื่อสลับแท็บ** (`document.visibilitychange`) กันเปลืองตอนเปิด
+ค้างไว้ไม่ได้ดู แล้ว refetch ทันทีตอนกลับมาดูแท็บ (ไม่ต้องรอ tick ถัดไป)
 
 **API**: field `system` ใหม่ใน `GET /api/admin/telemetry/summary` เดิม (ไม่แยก endpoint ใหม่) —
 `getSystemMetricsSeries()` คืนค่าย้อนหลังสูงสุด 500 sample (default) เรียงเก่า→ใหม่พร้อมใช้กับ chart
 ได้ตรงๆ (~4 ชม. ที่ interval 30 วิ) ไม่มี retention/prune บนตารางเองเหมือน `game_events`/`error_log`
 เดิม (risk เดียวกัน — ดู #24)
+
+**Schema migration**: `disk_used_mb`/`disk_total_mb` เพิ่มเข้ามา**หลัง** `system_metrics` ถูก deploy
+ไปแล้วรอบแรกบน production — แก้ด้วย `ensureColumn()` helper ใหม่ใน `telemetryDb.ts` (เช็ค
+`PRAGMA table_info` ก่อน `ALTER TABLE ADD COLUMN` เฉพาะที่ยังไม่มี) เพื่อ migrate DB ที่มีอยู่แล้วโดย
+ไม่ทำข้อมูลเดิมหาย — คอลัมน์ใหม่เป็น nullable ล้วน (ไม่ใส่ `NOT NULL`) เพราะ SQLite `ALTER TABLE ADD
+COLUMN` ใส่ `NOT NULL` ไม่ได้ถ้าไม่มี `DEFAULT` บนตารางที่มีแถวอยู่แล้ว
+
+**🐛 พบและแก้ race condition จริงในชุด test (ไม่ใช่แค่ feature นี้ — กระทบ test suite ทั้งหมด)**:
+`telemetryDb.ts`'s module-level singleton (`export const telemetryDb = createTelemetryConnection()`)
+เปิดไฟล์ dev DB จริง (`data/telemetry.dev.db`) เป็น side effect ทันทีที่ import — ทุก test file ที่
+import อะไรก็ตามที่พาดพิงถึง `TelemetryBuffer.ts`/`telemetryDb.ts` (ทางตรงหรือทางอ้อม) จะ trigger
+การเปิดไฟล์เดียวกันนี้ พอ vitest รันหลาย test file พร้อมกันใน worker คนละตัว ทุกตัวแย่งเปิด/แก้ไฟล์
+เดียวกันจริง ได้ `SqliteError: database is locked` เป็นครั้งคราว (เคยเข้าใจผิดว่าเป็น "transient
+flake" มาหลายรอบในเซสชันนี้ ก่อนจะ reproduce ซ้ำได้แน่นอนหลังเพิ่ม `ALTER TABLE` migration ซึ่งเปิด
+โอกาสชนกันมากกว่า `CREATE TABLE IF NOT EXISTS` เดิม) แก้โดยให้ singleton ใช้ `:memory:` แทนเมื่อรันใต้
+vitest (เช็ค `process.env.VITEST` ที่ vitest set ให้อัตโนมัติ) — ไม่มี test ไหนใช้ singleton ตัวนี้
+โดยตรงอยู่แล้ว (ทุก test สร้าง connection ของตัวเองผ่าน `createTelemetryConnection(':memory:')`)
+ปัญหาคือแค่การ import module เฉยๆ ก็ trigger side effect นี้ไปแล้ว
 
 ### 5.8 Stability Risk — Telemetry & Error Logging System
 
