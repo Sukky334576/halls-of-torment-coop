@@ -40,20 +40,28 @@ OPEN`) return จำนวนที่ยิงถึงจริง (ไว้ 
 เรียก `broadcastToAll({ type: 'SERVER_SHUTDOWN_WARNING', secondsRemaining })` ตอบกลับ
 `{ success: true, notified: <count> }`
 
-**ตัดสินใจ: ไม่ผูก `ADMIN_SECRET`** — ต่างจาก telemetry endpoints อื่นทั้งหมด เหตุผล: nginx (production
-site config) ไม่มี `location` block proxy path นี้เลย เรียกได้แค่จาก `curl 127.0.0.1:8080/...` บน
-เครื่อง VPS เอง (deploy script รันตรงนั้นอยู่แล้ว) ไม่มีทาง reach จากภายนอกได้จริง ต่างจาก telemetry
-data ที่มีข้อมูล error/behavior ผู้เล่นจริงต้อง gate เพราะ broadcast text ความเสี่ยงต่ำกว่ามาก — เสนอ
-ทางเลือกผูก secret ด้วยให้ user ตอนถามยืนยัน user เลือกไม่ผูกตามที่เสนอ
+**⚠️ Correction (2026-09-13, พบระหว่าง deploy จริงรอบแรก)**: ตัดสินใจแรกคือ "ไม่ผูก `ADMIN_SECRET`"
+โดยอ้างว่า nginx ไม่มี `location` block proxy path นี้เลย เรียกได้แค่จาก `curl 127.0.0.1:8080/...`
+บนเครื่อง VPS เอง **ข้อสันนิษฐานนี้ผิด** — nginx มี `location /api/` block แบบกว้าง proxy **ทุก path
+ใต้ `/api/`** มาที่ Node อยู่แล้ว (ไม่ใช่ whitelist เฉพาะ path ที่เคยตั้งใจเปิด แบบที่ `/admin/`
+เคยต้องเพิ่ม block แยกก่อนถึงจะใช้ได้) ยืนยันจริงด้วยการ `curl` จากเครื่องนอกไปที่
+`http://109.123.235.170/api/admin/broadcast-shutdown-warning` หลัง deploy ครั้งแรก แล้วได้ `200`
+กลับมาจริง (endpoint ใช้งานได้แบบไม่มี auth เลยบน public internet ช่วงสั้นๆ ก่อนแก้) แก้ทันทีด้วยการ
+เพิ่ม `requireAdminSecret()` guard เดียวกับ telemetry endpoints อื่น (เหมือนที่ควรทำตั้งแต่แรก) —
+deploy script ต้องอ่านค่า `ADMIN_SECRET` จาก `.env.server` บนเครื่อง VPS เองแล้วส่งเป็น header
+`X-Admin-Secret` (ไม่พิมพ์/echo ค่าออกมาที่ไหนเลย ตามกฎการจัดการ secret เดิม)
 
 ### 4. Client handler ใหม่ (`src/client/main.ts`)
 รับ `SERVER_SHUTDOWN_WARNING` แล้วโชว์ผ่าน `connectionBanner` เดิม (element เดียวกับตอน reconnect —
 ไม่สร้าง UI ใหม่) ข้อความนับถอยหลังวินาทีที่เหลือ ทั้งไทย/อังกฤษตาม `I18n.getLanguage()`
 
 ### 5. Deploy flow เปลี่ยน (ไม่ใช่โค้ดในนี้ repo — ขั้นตอน SSH ที่ใช้จริงตอน deploy)
-หลัง `npm run build` สำเร็จ **ก่อน** `pm2 restart game-server`:
+หลัง `npm run build` สำเร็จ **ก่อน** `pm2 restart game-server` (⚠️ ต้องมี `X-Admin-Secret` header
+หลัง correction ด้านบน — อ่านค่าจาก `.env.server` บนเครื่องเอง ไม่ hardcode/พิมพ์ค่าที่ไหน):
 ```bash
-curl -s -X POST http://127.0.0.1:8080/api/admin/broadcast-shutdown-warning -d '{"seconds":30}'
+ADMIN_SECRET_VALUE=$(grep -oP '^ADMIN_SECRET=\K.*' .env.server)
+curl -s -X POST http://127.0.0.1:8080/api/admin/broadcast-shutdown-warning \
+  -H "X-Admin-Secret: $ADMIN_SECRET_VALUE" -d '{"seconds":30}'
 sleep 30
 pm2 restart game-server
 ```
