@@ -626,6 +626,20 @@ class GameApp {
             break;
           }
 
+          case 'SERVER_SHUTDOWN_WARNING': {
+            // Reuses the reconnect banner — there's nothing to save client-side (run state is
+            // server-memory only), this just tells the player the coming disconnect is a planned
+            // update, not a bug. hideConnectionBanner() on the next successful onopen (i.e. once
+            // they reconnect after the restart) clears it same as any other banner.
+            const isTh = I18n.getLanguage() === 'th';
+            this.showConnectionBanner(
+              isTh
+                ? `🛠️ เซิร์ฟเวอร์กำลังอัปเดต จะตัดการเชื่อมต่อใน ${msg.secondsRemaining} วินาที`
+                : `🛠️ Server updating — disconnecting in ${msg.secondsRemaining}s`
+            );
+            break;
+          }
+
           case 'WELL_GEAR_RETRIEVED': {
             // Only the collector's own client gets this message (see GameRoom's
             // handlePickupCollection) — teammates just see the floating callout text via the

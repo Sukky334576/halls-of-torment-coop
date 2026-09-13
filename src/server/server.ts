@@ -546,6 +546,26 @@ function handleTelemetrySummary(req: http.IncomingMessage, res: http.ServerRespo
   });
 }
 
+// Deliberately NOT gated behind requireAdminSecret/ADMIN_SECRET like the telemetry endpoints
+// above — this is reached only via a plain `curl 127.0.0.1:8080/...` from the deploy script
+// running on the VPS itself, never through nginx (no `location` block proxies this path
+// publicly), so there's no way for it to be hit from outside the box. Broadcasting a warning
+// text is also much lower stakes than the telemetry data those other endpoints gate.
+async function handleAdminBroadcastShutdown(req: http.IncomingMessage, res: http.ServerResponse) {
+  let seconds = 30;
+  try {
+    const body = await readJsonBody<{ seconds?: unknown }>(req);
+    if (typeof body.seconds === 'number' && Number.isFinite(body.seconds) && body.seconds > 0) {
+      seconds = body.seconds;
+    }
+  } catch {
+    // No/invalid body is fine — a bare POST with no body just uses the 30s default above.
+  }
+  const notified = broadcastToAll({ type: 'SERVER_SHUTDOWN_WARNING', secondsRemaining: seconds });
+  console.log(`🛠️ Broadcast shutdown warning (${seconds}s) to ${notified} connected client(s)`);
+  sendJson(res, 200, { success: true, notified });
+}
+
 const TELEMETRY_DASHBOARD_PATH = path.resolve(__dirname, '../../admin/telemetry-dashboard.html');
 
 function handleTelemetryDashboardPage(req: http.IncomingMessage, res: http.ServerResponse) {
@@ -607,6 +627,10 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === '/admin/telemetry' && req.method === 'GET') {
     handleTelemetryDashboardPage(req, res);
+    return;
+  }
+  if (url.pathname === '/api/admin/broadcast-shutdown-warning' && req.method === 'POST') {
+    safeHandler(handleAdminBroadcastShutdown)(req, res);
     return;
   }
 
@@ -722,6 +746,20 @@ function broadcastToRoom(roomId: string, msg: ServerMessage) {
       client.ws.send(payload);
     }
   }
+}
+
+// Same as broadcastToRoom but with no roomId filter — for messages meant for every connected
+// client regardless of which room (or no room) they're in, e.g. SERVER_SHUTDOWN_WARNING.
+function broadcastToAll(msg: ServerMessage): number {
+  const payload = JSON.stringify(msg);
+  let count = 0;
+  for (const client of clients.values()) {
+    if (client.ws.readyState === WebSocket.OPEN) {
+      client.ws.send(payload);
+      count++;
+    }
+  }
+  return count;
 }
 
 wss.on('connection', (ws: WebSocket) => {
