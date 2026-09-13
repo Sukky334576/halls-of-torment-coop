@@ -546,12 +546,13 @@ function handleTelemetrySummary(req: http.IncomingMessage, res: http.ServerRespo
   });
 }
 
-// Deliberately NOT gated behind requireAdminSecret/ADMIN_SECRET like the telemetry endpoints
-// above — this is reached only via a plain `curl 127.0.0.1:8080/...` from the deploy script
-// running on the VPS itself, never through nginx (no `location` block proxies this path
-// publicly), so there's no way for it to be hit from outside the box. Broadcasting a warning
-// text is also much lower stakes than the telemetry data those other endpoints gate.
+// ⚠️ Gated behind requireAdminSecret same as the telemetry endpoints above — an earlier version
+// of this comment claimed nginx had no proxy rule for this path and so it was unreachable from
+// outside the box. That was wrong: nginx's `location /api/` block proxies everything under
+// `/api/` (not just specific sub-paths), so this endpoint was live and unauthenticated on the
+// public internet for one deploy before this fix. Confirmed by curling it from outside.
 async function handleAdminBroadcastShutdown(req: http.IncomingMessage, res: http.ServerResponse) {
+  if (!requireAdminSecret(req, res)) return;
   let seconds = 30;
   try {
     const body = await readJsonBody<{ seconds?: unknown }>(req);
