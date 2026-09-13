@@ -454,4 +454,8 @@ export type ServerMessage =
   | { type: 'GAME_OVER'; victory: boolean; survivalTime: number; totalKills: number; teamGold: number; personalGold: number; playerCount: number; clearedStageId?: number; reason?: 'BOSS_ENRAGE_EXECUTE' | 'SURRENDER'; canContinue?: boolean }
   // Confirms the server actually processed RETURN_TO_HUB (room released) before the client
   // reloads — see GAME_CONSTANTS.RETURN_TO_HUB_ACK_TIMEOUT_MS for the no-ack fallback.
-  | { type: 'RETURN_TO_HUB_ACK' };
+  | { type: 'RETURN_TO_HUB_ACK' }
+  // Sent to every connected client ahead of a planned `pm2 restart` during deploy — game state
+  // is in-memory only (no persistence), so this can't save an in-progress run, it only gives
+  // players a heads-up that the coming disconnect is an update, not a bug.
+  | { type: 'SERVER_SHUTDOWN_WARNING'; secondsRemaining: number };

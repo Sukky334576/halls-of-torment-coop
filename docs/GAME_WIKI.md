@@ -30,6 +30,7 @@
 | 2026-09-12 | แก้ risk #28 (ไม่มี `vitest.config.ts` ทำให้ test count เพี้ยนจาก git worktree อื่นที่ทำงานขนานกัน — พบจาก session `card-list-documentation` ตรวจสอบ archive spec ก่อนหน้า) — เพิ่ม `vitest.config.ts` exclude `.claude/**`, ยืนยันตัวเลขจริง 93/93 คงที่ | `docs/archive/2026-09-12-card-description-mismatch-fix.md` |
 | 2026-09-12 | พบและแก้ bug จาก user report: การ์ด "สถิติการเลือกการ์ด" กับ "Error ที่เจอบ่อยที่สุด" ติดกันไม่มีช่องว่าง — root cause: ทั้งคู่เป็น `.card` เดียวที่อยู่เป็น direct child ของ `#dashboard` ตรงๆ (ไม่ได้ห่อด้วย `.grid--*` เหมือนการ์ดอื่นทุกใบ) เลยไม่ได้ spacing จาก grid `gap` แก้ด้วย CSS scoped rule `#dashboard > .card { margin-bottom: 20px; }` เลือก selector นี้เพราะกระทบแค่ 2 การ์ดนี้เท่านั้น (การ์ดอื่นทั้งหมดซ้อนอยู่ในกริดอีกชั้น ไม่ตรงกับ selector นี้) ไม่เสี่ยง double-spacing กับ `gap` ของกริดเดิม | `docs/archive/2026-09-11-telemetry-error-logging.md` |
 | 2026-09-12 | User report: dashboard มีค่าที่ไม่รู้จะใช้อ้างอิง/วิเคราะห์อะไร แก้ 5 จุด — เพิ่ม win/loss breakdown ที่ "จำนวนเกมที่จบแล้ว", เพิ่ม N กำกับที่ "เวลาเล่นเฉลี่ย", เปลี่ยน pick-rate table ให้ไม่ไฮไลต์สีแถวที่ `timesOffered < 10` (⚠️ Correction §5.7.3), ตัด `level_up_choice`/`boss_kill` ออกจากกราฟ event-count (ซ้ำซ้อน/ไม่ actionable), เพิ่ม `bossKills` breakdown ใหม่ใน `getEventSummary()` + กราฟ "ฆ่าบอสสำเร็จ แยกตามตัวบอส" — ดู §5.7.6 | `docs/archive/2026-09-12-dashboard-clarity-fix.md` |
+| 2026-09-13 | User report: deploy ทำให้คนเล่นอยู่ disconnect โดยไม่รู้สาเหตุ — เพิ่ม `SERVER_SHUTDOWN_WARNING` broadcast ก่อน `pm2 restart` 30 วิ (ไม่ใช่ zero-downtime จริง แค่เตือนล่วงหน้า เพราะ game state อยู่ใน memory ล้วนๆ ไม่มี persistence) endpoint ใหม่ `POST /api/admin/broadcast-shutdown-warning` ตั้งใจไม่ผูก `ADMIN_SECRET` (ไม่มี nginx proxy ให้เลย reach จากนอกไม่ได้) — ดู §5.5 | `docs/archive/2026-09-13-deploy-shutdown-warning.md` |
 
 ## สารบัญ
 
@@ -638,7 +639,26 @@ actualDamage = max(1, round(incomingAmount × damageReduction))
 
 - **Shrine system** (SPEED/FRENZY/AEGIS/GOLD_RUSH/ALTAR_BLOOD/ALTAR_TEMPEST/ALTAR_VOID) — บัฟชั่วคราวยืนในโซน (นอก scope เอกสารนี้ แนะนำทำแยกถ้าต้องการรายละเอียดเต็ม)
 - **Prop/obstacle system** — สุ่ม deterministic ด้วย `mulberry32` PRNG ตาม stageId (22 ชิ้น/ด่าน)
-- **Reconnect system** (`RECONNECT_GRACE_MS=60,000`) — หลุดต่อไม่ตายทันที ghost ไว้ 60 วิ
+- **Reconnect system** (`RECONNECT_GRACE_MS=60,000`) — หลุดต่อไม่ตายทันที ghost ไว้ 60 วิ **ใช้ได้แค่
+  กรณี process เดิมยังรันอยู่** (เช่น WiFi หลุดชั่วคราว) — ไม่ครอบคลุมกรณี `pm2 restart` (ดู Deploy
+  Shutdown Warning ด้านล่าง) เพราะ `GameRoom` ทั้งหมดอยู่ใน memory ล้วนๆ ไม่มี persistence เลย
+  process ใหม่หลัง restart ไม่รู้จัก room เดิม
+- **Deploy Shutdown Warning** (2026-09-13, ที่มา: `docs/archive/2026-09-13-deploy-shutdown-warning.md`)
+  — user report: deploy ทำให้คนกำลังเล่นอยู่ disconnect โดยไม่รู้สาเหตุ (เดิม `SIGTERM` handler
+  ใน `server.ts` แค่ flush telemetry แล้ว exit ทันที ไม่เตือนใครเลย) **ไม่ใช่ zero-downtime จริง**
+  (ข้อจำกัดเดิมข้างบน — state ในรันที่กำลังเล่นอยู่ยังเสียอยู่ดี) แค่ทำให้ผู้เล่นรู้ตัวล่วงหน้าว่ากำลัง
+  จะหลุดเพราะอัปเดต ไม่ใช่บั๊ก แก้โดย:
+  - `ServerMessage` ใหม่ `SERVER_SHUTDOWN_WARNING { secondsRemaining }` + `broadcastToAll()` ใหม่
+    ใน `server.ts` (เหมือน `broadcastToRoom` เดิมแต่ไม่กรอง roomId — ยิงทุก client ที่ต่ออยู่)
+  - Endpoint ใหม่ `POST /api/admin/broadcast-shutdown-warning` — **ตั้งใจไม่ผูก `ADMIN_SECRET`**
+    เพราะ nginx ไม่มี proxy rule ให้ path นี้เลย (ไม่มีทาง reach จากภายนอกได้) เรียกได้แค่จาก
+    `curl 127.0.0.1:8080/...` บนเครื่อง VPS เองตอน deploy เท่านั้น + broadcast text เป็นข้อมูลความ
+    เสี่ยงต่ำกว่า telemetry data มาก ไม่จำเป็นต้อง gate เท่ากัน
+  - Client (`main.ts`) รับ message นี้แล้วโชว์ผ่าน `connectionBanner` เดิม (banner เดียวกับตอน
+    reconnect) ข้อความนับถอยหลังวินาทีที่เหลือ
+  - **Deploy flow ใหม่**: หลัง build สำเร็จ **ก่อน** `pm2 restart` ต้องรัน
+    `curl -s -X POST http://127.0.0.1:8080/api/admin/broadcast-shutdown-warning -d '{"seconds":30}'`
+    แล้ว `sleep 30` ก่อนค่อย `pm2 restart game-server` (ไม่ทำแบบนี้ = กลับไปเป็นปัญหาเดิม)
 - **Leave-room-mid-match flows**: `SURRENDER` (solo/คนสุดท้าย → `isOver=true`, coop → `removePlayer`)
   และ `RETURN_TO_HUB` (เหมือนกันทุกประการแต่ไม่มี gold penalty/ไม่ resend GAME_OVER — ใช้ตอนกด
   "กลับสู่ล็อบบี้" บนหน้า GAME_OVER ใดก็ได้ รวมโพสต์-victory, ack ผ่าน `RETURN_TO_HUB_ACK` ก่อน client
