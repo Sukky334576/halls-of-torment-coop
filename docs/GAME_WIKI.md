@@ -32,6 +32,7 @@
 | 2026-09-12 | User report: dashboard มีค่าที่ไม่รู้จะใช้อ้างอิง/วิเคราะห์อะไร แก้ 5 จุด — เพิ่ม win/loss breakdown ที่ "จำนวนเกมที่จบแล้ว", เพิ่ม N กำกับที่ "เวลาเล่นเฉลี่ย", เปลี่ยน pick-rate table ให้ไม่ไฮไลต์สีแถวที่ `timesOffered < 10` (⚠️ Correction §5.7.3), ตัด `level_up_choice`/`boss_kill` ออกจากกราฟ event-count (ซ้ำซ้อน/ไม่ actionable), เพิ่ม `bossKills` breakdown ใหม่ใน `getEventSummary()` + กราฟ "ฆ่าบอสสำเร็จ แยกตามตัวบอส" — ดู §5.7.6 | `docs/archive/2026-09-12-dashboard-clarity-fix.md` |
 | 2026-09-13 | User report: deploy ทำให้คนเล่นอยู่ disconnect โดยไม่รู้สาเหตุ — เพิ่ม `SERVER_SHUTDOWN_WARNING` broadcast ก่อน `pm2 restart` 30 วิ (ไม่ใช่ zero-downtime จริง แค่เตือนล่วงหน้า เพราะ game state อยู่ใน memory ล้วนๆ ไม่มี persistence) endpoint ใหม่ `POST /api/admin/broadcast-shutdown-warning` — ดู §5.5 | `docs/archive/2026-09-13-deploy-shutdown-warning.md` |
 | 2026-09-13 | ⚠️ Correction: endpoint ข้างบนเปิด deploy ครั้งแรกโดยไม่มี `ADMIN_SECRET` — เข้าใจผิดว่า nginx ไม่ proxy path นี้ ที่จริง `location /api/` proxy ทุกอย่างใต้ `/api/` อยู่แล้ว ยืนยันด้วย curl จากภายนอกได้ `200` จริง (ไม่มี auth) แก้ทันทีด้วย `requireAdminSecret()` — ดู §5.5 correction | `docs/archive/2026-09-13-deploy-shutdown-warning.md` |
+| 2026-09-14 | User report: วง telegraph สีแดงของ Ground Slam (Elite Golem) สั้นเกินไปจะหลบทัน — เพิ่ม `SLAM_TELEGRAPH_DURATION` จาก 0.4s เป็น **1.5s** (`GameRoom.ts`) cooldown/damage เดิมไม่เปลี่ยน — ดู §3.3 | `docs/archive/2026-09-14-ground-slam-telegraph-duration.md` |
 
 ## สารบัญ
 
@@ -369,7 +370,7 @@ private rollGearDrop(isBoss: boolean): GearItem | undefined {
 
 | Monster | ท่า | Cooldown | เงื่อนไข | ดาเมจ/เอฟเฟกต์ |
 |---|---|---|---|---|
-| ELITE_GOLEM | Ground Slam (melee AOE) | 7s | มีผู้เล่นในระยะ ≤260px | ⚠️ **แก้ 2026-09-11**: เดิม telegraph-free (ดาเมจลงทันทีตอน cast) ตอนนี้เป็น 2 phase — warning ring (`TITAN_QUAKE_TELEGRAPH`, ไม่ดาเมจ) 0.4s ก่อน แล้วค่อยดาเมจ ×2.5 แก่ทุกคนในรัศมี 180px ที่ตำแหน่ง**ตอน cast** (ไม่ใช่ตำแหน่งบอสตอน impact — golem เดินหนีระหว่าง charge ได้ แต่วงระเบิดไม่ตาม) |
+| ELITE_GOLEM | Ground Slam (melee AOE) | 7s | มีผู้เล่นในระยะ ≤260px | warning ring (`TITAN_QUAKE_TELEGRAPH`, ไม่ดาเมจ) **1.5s** ก่อน (⚠️ แก้ 2026-09-14 จาก 0.4s เดิม — 0.4s สั้นเกินจะมีเวลาหลบจริง ดู Change Log) แล้วค่อยดาเมจ ×2.5 แก่ทุกคนในรัศมี 180px ที่ตำแหน่ง**ตอน cast** (ไม่ใช่ตำแหน่งบอสตอน impact — golem เดินหนีระหว่าง charge ได้ แต่วงระเบิดไม่ตาม) |
 | ELITE_GOLEM | Boulder Toss (ranged) | 5s | ผู้เล่นใกล้สุด 260-650px | `ENEMY_ARROW` ดาเมจ ×1.4 |
 | LORD_OF_TORMENT | Void Barrage (ranged fan 5 นัด) | 6s | ผู้เล่นใกล้สุด ≤550px | `ENEMY_VOID_ORB` ×5 กระจาย ±0.5 rad ดาเมจ ×0.8/นัด |
 | LORD_OF_TORMENT | Reinforcements | 15s | — | Spawn HELLHOUND ปกติ 2 ตัว |

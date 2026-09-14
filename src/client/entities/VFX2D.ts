@@ -1134,7 +1134,7 @@ export class VFX2D {
         case ProjectileType.TITAN_QUAKE_TELEGRAPH: {
           // Elite Golem Ground Slam wind-up warning — dashed danger-zone ring, no fill impact
           // yet (that's TITAN_QUAKE_WAVE below, once the real hit lands). Fast pulse so it
-          // reads clearly even during its short ~0.4s window.
+          // reads clearly for its whole SLAM_TELEGRAPH_DURATION window (GameRoom.ts).
           const r = proj.radius || 180;
           const pulse = 0.5 + Math.sin(time * 20) * 0.5;
 
