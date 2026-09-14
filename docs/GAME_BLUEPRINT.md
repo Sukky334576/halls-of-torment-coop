@@ -31,6 +31,7 @@
 | 2026-09-12 | แก้ risk #28 (ไม่มี `vitest.config.ts` ทำให้ test count เพี้ยนจาก git worktree ของ session อื่นที่ทำงานขนานกัน — พบจาก session `card-list-documentation` ตรวจ archive spec #27 แล้วเจอตัวเลขรายงานผิด 293/293 ทั้งที่จริงคือ 93/93) — เพิ่ม `vitest.config.ts` exclude `.claude/**` | `docs/archive/2026-09-12-card-description-mismatch-fix.md` |
 | 2026-09-12 | User report: dashboard มีค่าที่วิเคราะห์/อ้างอิงอะไรไม่ได้ (ไม่มี N กำกับ, ซ่อน win/loss, ไม่แยกบอส) แก้ 5 จุดใน `admin/telemetry-dashboard.html` + เพิ่ม `bossKills` field ใหม่ใน `getEventSummary()` (`telemetryQueries.ts`) — ดู GAME_WIKI.md §5.7.6 | `docs/archive/2026-09-12-dashboard-clarity-fix.md` |
 | 2026-09-13 | User report: deploy (`pm2 restart`) ทำให้คนกำลังเล่นอยู่ disconnect แบบไม่รู้สาเหตุ — เพิ่ม `SERVER_SHUTDOWN_WARNING` broadcast 30 วิก่อน restart (ไม่ใช่ zero-downtime, game state ยังอยู่ memory ล้วนๆ) `ServerMessage` ใหม่ + `broadcastToAll()`/`POST /api/admin/broadcast-shutdown-warning` ใหม่ใน `server.ts`, client banner ใหม่ใน `main.ts` — ⚠️ deploy รอบแรกเปิด endpoint นี้แบบไม่มี auth เพราะเข้าใจผิดเรื่อง nginx proxy scope แก้ทันทีด้วย `ADMIN_SECRET` — ดู GAME_WIKI.md §5.5 | `docs/archive/2026-09-13-deploy-shutdown-warning.md` |
+| 2026-09-14 | User report (กำลังเล่นอยู่ตอนแจ้ง): วง telegraph สีแดงของ Ground Slam (ELITE_GOLEM) สั้นเกินจะหลบทัน — เพิ่ม `SLAM_TELEGRAPH_DURATION` 0.4s → 1.5s (`GameRoom.ts`) balance tweak ล้วน ไม่แตะ cooldown/damage/รัศมี — sync กับ GAME_WIKI.md §3.3 | `docs/archive/2026-09-14-ground-slam-telegraph-duration.md` |
 >
 > สร้างเมื่อ 2026-09-11
 

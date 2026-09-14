@@ -2379,7 +2379,7 @@ export class GameRoom {
     monster.bossSummonTimer += dt;
 
     if (monster.type === MonsterType.ELITE_GOLEM) {
-      // Ground Slam: a 0.4s telegraphed AOE (7s cooldown between casts) — punishes standing
+      // Ground Slam: a telegraphed AOE (7s cooldown between casts) — punishes standing
       // still in melee range, but gives a genuine warning window to back out of first. Used to
       // be instant/telegraph-free (damage applied the same tick the cast started, with only a
       // 0.45s POST-impact visual) — a modified client or a monster horde occluding the impact
@@ -2388,7 +2388,9 @@ export class GameRoom {
       // for slamTelegraphTimer's duration, then the real hit + TITAN_QUAKE_WAVE impact visual.
       const SLAM_COOLDOWN = 7;
       const SLAM_RADIUS = 180;
-      const SLAM_TELEGRAPH_DURATION = 0.4;
+      // 2026-09-14: bumped from 0.4s per user report — 0.4s didn't give a real reaction window,
+      // it just barely registered visually before the hit landed.
+      const SLAM_TELEGRAPH_DURATION = 1.5;
 
       if (monster.slamTelegraphTimer > 0) {
         monster.slamTelegraphTimer -= dt;

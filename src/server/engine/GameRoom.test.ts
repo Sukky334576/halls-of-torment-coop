@@ -369,13 +369,13 @@ describe('GameRoom Ground Slam telegraph (Elite Golem, docs/archive/2026-09-11-p
     clearSpawnProtection(player);
     const golem = makeSlamReadyGolem(0, 0);
 
-    (room as any).updateBossAbilities(golem, 0.1, [player]); // cast starts, telegraph = 0.4s
+    (room as any).updateBossAbilities(golem, 0.1, [player]); // cast starts, telegraph = 1.5s
     expect(player.stats.hp).toBe(player.stats.maxHp);
 
-    (room as any).updateBossAbilities(golem, 0.2, [player]); // 0.2s into the 0.4s wind-up
+    (room as any).updateBossAbilities(golem, 1.0, [player]); // 1.0s into the 1.5s wind-up
     expect(player.stats.hp).toBe(player.stats.maxHp); // still charging, still no damage
 
-    (room as any).updateBossAbilities(golem, 0.2, [player]); // crosses the 0.4s mark — impact
+    (room as any).updateBossAbilities(golem, 0.5, [player]); // crosses the 1.5s mark — impact
     expect(player.stats.hp).toBeLessThan(player.stats.maxHp);
     expect(golem.slamTelegraphTimer).toBe(0);
   });
@@ -392,7 +392,7 @@ describe('GameRoom Ground Slam telegraph (Elite Golem, docs/archive/2026-09-11-p
     golem.x = 900; // golem "wanders" far away during the wind-up (movement is a separate system)
     golem.y = 900;
 
-    (room as any).updateBossAbilities(golem, 0.4, [player]); // resolve — player never moved
+    (room as any).updateBossAbilities(golem, 1.5, [player]); // resolve — player never moved
 
     // Player standing at the ORIGINAL cast position still takes the hit even though the golem
     // itself is now nowhere near them — the slam is anchored to where it was cast.
@@ -411,7 +411,7 @@ describe('GameRoom Ground Slam telegraph (Elite Golem, docs/archive/2026-09-11-p
     player.x = 500; // dodges far outside SLAM_RADIUS before the impact resolves
     player.y = 0;
 
-    (room as any).updateBossAbilities(golem, 0.4, [player]); // resolve
+    (room as any).updateBossAbilities(golem, 1.5, [player]); // resolve
 
     expect(player.stats.hp).toBe(player.stats.maxHp); // dodged successfully
   });
